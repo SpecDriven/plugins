@@ -1,0 +1,14 @@
+{
+  "name": "specdriven",
+  "owner": { "name": "SpecDriven", "url": "https://github.com/SpecDriven" },
+  "plugins": [
+    {
+      "name": "hello-tab",
+      "source": "./plugins/hello-tab",
+      "description": "A sample tab: the scaffold `specdriven plugin new` writes, built to dist/",
+      "version": "0.1.0",
+      "category": "samples",
+      "api": "1"
+    }
+  ]
+}
