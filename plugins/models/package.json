@@ -1,0 +1,54 @@
+{
+  "name": "@specdriven/plugin-models",
+  "version": "1.0.0",
+  "description": "Event Models drawn on a canvas, sliced into specs",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./dist/host.js",
+    "./client": "./dist/client.js"
+  },
+  "scripts": {
+    "build": "specdriven plugin build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "specdriven": {
+    "id": "models",
+    "api": "1",
+    "displayName": "Event models",
+    "description": "Event Models drawn on a canvas, sliced into specs",
+    "host": "./dist/host.js",
+    "client": "./dist/client.js",
+    "src": {
+      "host": "./src/host.ts",
+      "client": "./src/client.tsx"
+    },
+    "minAppVersion": "0.1.87",
+    "defaultEnabled": true,
+    "paths": [
+      "/models"
+    ],
+    "permissions": [
+      "data:read",
+      "data:write",
+      "git:commit"
+    ]
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.11.6",
+    "ajv": "^8.20.0",
+    "lucide-react": "^1.39.0"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^5"
+  }
+}
