@@ -1,0 +1,600 @@
+/* ---- Event Models (roadmap/support-event-modeling.md) ----
+   The Models tab's canvas: swimlanes across, slice bands down, cards in the
+   cells. Card colours are the cheat sheet's, as tokens so both themes read
+   the same: screens white, commands blue, events orange, read models
+   green, automations violet. */
+:root {
+  --em-screen-bg: light-dark(#ffffff, #2a2b30);
+  --em-screen-fg: light-dark(#282a30, #e6e6e8);
+  --em-command-bg: light-dark(#cfe2ff, #2a3f66);
+  --em-command-fg: light-dark(#1b3a75, #cfe0ff);
+  --em-event-bg: light-dark(#ffd8a8, #6b4517);
+  --em-event-fg: light-dark(#6b3d00, #ffe1bd);
+  --em-readmodel-bg: light-dark(#c8f0d0, #1f5a34);
+  --em-readmodel-fg: light-dark(#0f4d25, #d3f5db);
+  --em-automation-bg: light-dark(#e6d5ff, #4b3270);
+  --em-automation-fg: light-dark(#3f1e73, #ead9ff);
+  --em-lane-ui: light-dark(rgba(0, 0, 0, 0.015), rgba(255, 255, 255, 0.015));
+  --em-lane-cmd: light-dark(rgba(94, 106, 210, 0.04), rgba(110, 121, 230, 0.05));
+  --em-lane-events: light-dark(rgba(255, 160, 40, 0.05), rgba(255, 170, 60, 0.05));
+  --em-band: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.05));
+  --em-band-selected: light-dark(rgba(94, 106, 210, 0.1), rgba(110, 121, 230, 0.14));
+}
+
+.em-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.em-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.em-toolbar-gap {
+  width: 0.6rem;
+}
+
+/* Pushes what follows — the Assigned chip — to the toolbar's right end. */
+.em-toolbar-end {
+  flex: 1;
+}
+
+.em-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 1.7rem;
+  padding: 0 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.em-add:hover {
+  border-color: var(--text-3);
+}
+
+.em-add.em-screen { border-left: 4px solid var(--em-screen-fg); }
+.em-add.em-command { border-left: 4px solid var(--em-command-bg); }
+.em-add.em-event { border-left: 4px solid var(--em-event-bg); }
+.em-add.em-readmodel { border-left: 4px solid var(--em-readmodel-bg); }
+.em-add.em-automation { border-left: 4px solid var(--em-automation-bg); }
+
+.em-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 19rem;
+  gap: 0.6rem;
+}
+
+.em-canvas {
+  position: relative;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-0);
+  overflow: hidden;
+}
+
+.em-canvas .react-flow {
+  background: var(--surface-0);
+  --xy-background-pattern-dots-color-default: var(--border-strong);
+  --xy-edge-stroke-default: var(--text-3);
+  --xy-edge-stroke-selected-default: var(--accent);
+  --xy-edge-stroke-width-default: 1.5;
+  --xy-connectionline-stroke-default: var(--accent);
+  --xy-handle-background-color-default: var(--accent);
+  --xy-handle-border-color-default: var(--surface-0);
+  --xy-minimap-background-color-default: var(--surface-1);
+  --xy-minimap-mask-background-color-default: light-dark(rgba(240, 240, 240, 0.6), rgba(20, 20, 20, 0.6));
+  --xy-controls-button-background-color-default: var(--surface-2);
+  --xy-controls-button-background-color-hover-default: var(--hover);
+  --xy-controls-button-color-default: var(--text-2);
+  --xy-controls-button-color-hover-default: var(--text-1);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-controls-box-shadow-default: var(--shadow-md);
+  --xy-node-boxshadow-selected-default: 0 0 0 3px var(--ring);
+}
+
+.em-canvas .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.em-canvas .react-flow__edge.selected .react-flow__edge-path,
+.em-canvas .react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.em-canvas .react-flow__arrowhead polyline {
+  fill: var(--text-3);
+  stroke: var(--text-3);
+}
+
+.em-canvas .react-flow__minimap-node {
+  fill: var(--border-strong);
+}
+
+/* Lanes and bands are backgrounds: no ring of their own when selected,
+   the band's tint says it instead. */
+.em-canvas .react-flow__node-lane,
+.em-canvas .react-flow__node-slice {
+  pointer-events: auto;
+  cursor: default;
+}
+
+.em-canvas .react-flow__node-lane.selected,
+.em-canvas .react-flow__node-slice.selected {
+  box-shadow: none;
+}
+
+.em-lane {
+  width: 100%;
+  height: 100%;
+  border-top: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.em-lane-screen_automation { background: var(--em-lane-ui); }
+.em-lane-command_readmodel { background: var(--em-lane-cmd); }
+.em-lane-events { background: var(--em-lane-events); }
+
+.em-lane.selected {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.em-lane-title {
+  position: sticky;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 158px;
+  margin: 0.5rem 0 0 0.6rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.em-slice {
+  width: 100%;
+  height: 100%;
+  border-left: 1px dashed var(--border-strong);
+  background: var(--em-band);
+  box-sizing: border-box;
+}
+
+.em-slice.selected {
+  background: var(--em-band-selected);
+}
+
+.em-slice-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 40px;
+  padding: 0 0.6rem;
+  color: var(--text-1);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.em-slice-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.em-slice-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.em-slice-kind,
+.em-slice-link,
+.em-slice-specs {
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+.em-slice-link {
+  padding: 0 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: none;
+  font: inherit;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.em-slice-link:hover,
+.em-slice-link:focus-visible {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+/* The inspector's "Generate feature file", with the scenario count as a tag. */
+.em-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  align-self: flex-start;
+}
+
+.em-generate-count {
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--code-bg);
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+/* A feature's crumb naming the Event Model it belongs to. */
+.crumb-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.em-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 2px var(--shadow-c2);
+  font-size: 0.8125rem;
+  box-sizing: border-box;
+  /* Handles straddle the edge: nothing may clip them, or an arrow cannot
+     be started from the outer half. The texts clip themselves. */
+  overflow: visible;
+  cursor: grab;
+}
+
+.em-card.external {
+  border-style: dashed;
+}
+
+.em-screen { background: var(--em-screen-bg); color: var(--em-screen-fg); }
+.em-command { background: var(--em-command-bg); color: var(--em-command-fg); }
+.em-event { background: var(--em-event-bg); color: var(--em-event-fg); }
+.em-readmodel { background: var(--em-readmodel-bg); color: var(--em-readmodel-fg); }
+.em-automation { background: var(--em-automation-bg); color: var(--em-automation-fg); }
+
+.em-card-kind {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.em-card-tag {
+  padding: 0 0.3rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.5625rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  opacity: 0.9;
+}
+
+.em-card-title {
+  margin-top: 0.25rem;
+  font-weight: 600;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.em-card-fields {
+  margin-top: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Handles show for the card under the pointer, and while an arrow is being
+   drawn — otherwise a card is a card, not a pincushion. */
+.em-card .react-flow__handle {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.em-card:hover .react-flow__handle,
+.react-flow.connecting .em-card .react-flow__handle,
+.react-flow__node.selected .em-card .react-flow__handle {
+  opacity: 1;
+}
+
+.em-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-3);
+  font-size: 0.8125rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.em-empty p {
+  max-width: 22rem;
+  margin: 0;
+}
+
+/* The inspector: one form column, scrolling on its own. */
+.em-inspector {
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.em-inspector-empty {
+  padding: 1rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.em-inspector-empty p {
+  margin: 0 0 0.6rem;
+}
+
+.em-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.8rem;
+}
+
+.em-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: -0.8rem -0.8rem 0.2rem;
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.em-panel-kind {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.em-panel-sub {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.em-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.em-row-label {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.em-inspector input,
+.em-inspector select,
+.em-inspector textarea {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 0.8125rem;
+  box-sizing: border-box;
+}
+
+.em-inspector input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.em-inspector input:focus,
+.em-inspector select:focus,
+.em-inspector textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.em-inspector textarea {
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.em-inline,
+.em-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.em-stepper span {
+  min-width: 4rem;
+  text-align: center;
+  color: var(--text-1);
+}
+
+.em-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.em-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.em-section .hint {
+  margin: 0;
+}
+
+.em-field {
+  display: grid;
+  grid-template-columns: 1fr 5.2rem auto auto auto;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.em-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  font-size: 0.625rem;
+  color: var(--text-2);
+}
+
+.em-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--text-1);
+}
+
+.em-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0;
+}
+
+.em-spec {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.em-spec-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.em-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.em-steps-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.em-step {
+  display: grid;
+  grid-template-columns: 6rem 1fr auto;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.em-panel-foot {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.em-panel-foot button.danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.em-panel-foot button.danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-actions > button.em-import {
+  flex: none;
+  padding: 0.4rem 0.5rem;
+}
+
+@media (max-width: 900px) {
+  .em-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 16rem;
+  }
+}

@@ -1,7 +1,18 @@
 {
   "name": "specdriven",
-  "owner": { "name": "SpecDriven", "url": "https://github.com/SpecDriven" },
+  "owner": {
+    "name": "SpecDriven",
+    "url": "https://github.com/SpecDriven"
+  },
   "plugins": [
+    {
+      "name": "models",
+      "source": "./plugins/models",
+      "description": "Event Models drawn on a canvas, sliced into specs — the Models tab, formerly built in",
+      "version": "1.0.0",
+      "category": "modeling",
+      "api": "1"
+    },
     {
       "name": "hello-tab",
       "source": "./plugins/hello-tab",
