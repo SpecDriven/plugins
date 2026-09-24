@@ -1,0 +1,53 @@
+{
+  "name": "@specdriven/plugin-event-storming",
+  "version": "1.0.0",
+  "description": "Classic Event Storming: a wall of sticky notes for exploring a domain",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./dist/host.js",
+    "./client": "./dist/client.js"
+  },
+  "scripts": {
+    "build": "specdriven plugin build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "specdriven": {
+    "id": "event-storming",
+    "api": "1",
+    "displayName": "Event Storming",
+    "description": "Classic Event Storming: a wall of sticky notes — domain events on a timeline, commands, actors, policies, aggregates, read models, external systems and hotspots",
+    "host": "./dist/host.js",
+    "client": "./dist/client.js",
+    "src": {
+      "host": "./src/host.ts",
+      "client": "./src/client.tsx"
+    },
+    "minAppVersion": "0.1.87",
+    "defaultEnabled": true,
+    "paths": [
+      "/storms"
+    ],
+    "permissions": [
+      "data:read",
+      "data:write",
+      "git:commit"
+    ]
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.11.6",
+    "lucide-react": "^1.39.0"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^5"
+  }
+}
