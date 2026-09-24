@@ -14,6 +14,14 @@
       "api": "1"
     },
     {
+      "name": "event-storming",
+      "source": "./plugins/event-storming",
+      "description": "Classic Event Storming: a wall of sticky notes — domain events on a timeline, commands, actors, policies, aggregates, read models, external systems and hotspots",
+      "version": "1.0.0",
+      "category": "modeling",
+      "api": "1"
+    },
+    {
       "name": "hello-tab",
       "source": "./plugins/hello-tab",
       "description": "A sample tab: the scaffold `specdriven plugin new` writes, built to dist/",

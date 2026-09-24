@@ -1,0 +1,4 @@
+[test]
+# The app's test isolation, and settings folders of the tests' own
+# (test/preload.ts).
+preload = ["./test/preload.ts"]

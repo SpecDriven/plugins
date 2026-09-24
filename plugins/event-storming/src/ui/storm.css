@@ -1,0 +1,758 @@
+/* ---- Event Storming ----
+   The wall: sticky notes in the classic legend's colours on the app's own
+   surface, which follows the theme while the paper does not — a sticky is
+   the same orange in a dark room. Areas are dashed frames beneath them. */
+
+.storm-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.storm-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 15.5rem;
+  gap: 0.6rem;
+}
+
+.storm-body.no-legend {
+  grid-template-columns: 1fr;
+}
+
+.storm-wall {
+  position: relative;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-0);
+  overflow: hidden;
+  outline: none;
+}
+
+.storm-wall:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.storm-wall .react-flow {
+  background: var(--surface-0);
+  --xy-background-pattern-dots-color-default: var(--border-strong);
+  --xy-edge-stroke-default: var(--text-2);
+  --xy-edge-stroke-selected-default: var(--accent);
+  --xy-edge-stroke-width-default: 1.75;
+  --xy-connectionline-stroke-default: var(--accent);
+  --xy-handle-background-color-default: var(--accent);
+  --xy-handle-border-color-default: var(--surface-0);
+  --xy-minimap-background-color-default: var(--surface-1);
+  --xy-minimap-mask-background-color-default: light-dark(rgba(240, 240, 240, 0.6), rgba(20, 20, 20, 0.6));
+  --xy-controls-button-background-color-default: var(--surface-2);
+  --xy-controls-button-background-color-hover-default: var(--hover);
+  --xy-controls-button-color-default: var(--text-2);
+  --xy-controls-button-color-hover-default: var(--text-1);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-controls-box-shadow-default: var(--shadow-md);
+  --xy-selection-background-color-default: light-dark(rgba(94, 106, 210, 0.08), rgba(110, 121, 230, 0.12));
+  --xy-selection-border-default: 1px dashed var(--accent);
+}
+
+.storm-wall .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.storm-wall .react-flow__edge.selected .react-flow__edge-path,
+.storm-wall .react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.storm-wall .react-flow__arrowhead polyline {
+  fill: var(--text-2);
+  stroke: var(--text-2);
+}
+
+/* The nodes draw their own selection. */
+.storm-wall .react-flow__node.selected,
+.storm-wall .react-flow__node:focus,
+.storm-wall .react-flow__node:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+/* ---- A sticky ---- */
+
+.storm-sticky {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 0.45rem 0.55rem 0.55rem;
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.12),
+    0 6px 12px -6px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+
+.react-flow__node.dragging .storm-sticky {
+  cursor: grabbing;
+  box-shadow:
+    0 2px 2px rgba(0, 0, 0, 0.12),
+    0 14px 24px -10px rgba(0, 0, 0, 0.45);
+}
+
+.storm-sticky.selected {
+  outline: 2.5px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.storm-kind {
+  flex: none;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.storm-text {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  line-height: 1.2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.storm-text.blank {
+  opacity: 0.4;
+  font-style: italic;
+}
+
+.storm-writer {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.2rem;
+  padding: 0.2rem;
+  border: 1px dashed currentColor;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.35);
+  color: inherit;
+  font: 500 0.8125rem/1.25 var(--font-sans);
+  text-align: center;
+  resize: none;
+  outline: none;
+}
+
+.storm-writer::placeholder {
+  color: inherit;
+  opacity: 0.45;
+}
+
+/* An actor is the small yellow one, a head and shoulders beside its name. */
+.storm-actor {
+  padding: 0.3rem 0.45rem 0.35rem;
+}
+
+.storm-actor .storm-kind::before {
+  content: "☺ ";
+}
+
+/* An aggregate is the big yellow one; its name sits at the top, where the
+   workshop writes it before the rules underneath. */
+.storm-aggregate .storm-text {
+  align-items: flex-start;
+  padding-top: 0.4rem;
+  font-weight: 700;
+}
+
+/* A hotspot is stuck on its corner. The diamond is drawn behind the text
+   so the text stays level. */
+.storm-hotspot {
+  background: transparent;
+  box-shadow: none;
+  padding: 1.6rem 1.35rem 1.4rem;
+  align-items: center;
+}
+
+.storm-diamond {
+  position: absolute;
+  inset: 14.6%;
+  background: var(--paper);
+  transform: rotate(45deg);
+  border-radius: 3px;
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.12),
+    0 6px 12px -6px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.storm-hotspot .storm-kind,
+.storm-hotspot .storm-text,
+.storm-hotspot .storm-writer {
+  position: relative;
+}
+
+.storm-hotspot .storm-kind {
+  opacity: 0.8;
+}
+
+.storm-hotspot.selected {
+  outline: none;
+}
+
+.storm-hotspot.selected .storm-diamond {
+  outline: 2.5px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.storm-hotspot .storm-writer {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* An external system is the wide pink one. */
+.storm-external .storm-kind::before {
+  content: "⧉ ";
+}
+
+/* A note is plain paper, with a border so it reads on a light wall. */
+.storm-note {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+/* A pivotal event: the boundary line taped through it, top to bottom of
+   the wall, behind every other sticky (flow.ts puts it a layer lower). */
+.storm-sticky.pivotal {
+  box-shadow:
+    0 0 0 3px var(--ink),
+    0 6px 12px -6px rgba(0, 0, 0, 0.35);
+}
+
+.storm-sticky.pivotal::before {
+  content: "";
+  position: absolute;
+  left: calc(50% - 2px);
+  top: -2400px;
+  bottom: -2400px;
+  z-index: -1;
+  border-left: 4px dashed light-dark(rgba(214, 107, 0, 0.45), rgba(255, 169, 77, 0.45));
+  pointer-events: none;
+}
+
+/* Arrows are drawn from a sticky's right edge to another's left. */
+.storm-handle.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.storm-sticky:hover .storm-handle,
+.react-flow.connecting .storm-handle,
+.react-flow__node.selected .storm-handle {
+  opacity: 1;
+}
+
+.storm-hotspot .storm-handle.react-flow__handle-left {
+  left: 14%;
+}
+
+.storm-hotspot .storm-handle.react-flow__handle-right {
+  right: 14%;
+}
+
+/* ---- An area ---- */
+
+/* The frame lets the pointer through to the wall — only its label and its
+   resize handles take it — so a selection box or a pan can start inside. */
+.storm-wall .react-flow__node.storm-area-node {
+  pointer-events: none;
+}
+
+.storm-area {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 2px dashed light-dark(rgba(60, 70, 90, 0.35), rgba(200, 210, 230, 0.3));
+  border-radius: var(--radius-lg);
+  background: light-dark(rgba(60, 70, 90, 0.035), rgba(200, 210, 230, 0.04));
+}
+
+.storm-area.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.storm-area-label {
+  display: inline-block;
+  max-width: calc(100% - 1.2rem);
+  margin: 0.5rem 0 0 0.6rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: all;
+  cursor: move;
+}
+
+.storm-area-label.blank {
+  color: var(--text-3);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.storm-area-label.editing {
+  padding: 0;
+  cursor: auto;
+}
+
+.storm-area-label .storm-writer {
+  min-width: 14rem;
+  margin: 0;
+  border: none;
+  background: var(--surface-0);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.storm-wall .storm-resize-handle,
+.storm-wall .storm-resize-line {
+  pointer-events: all;
+}
+
+.storm-wall .storm-resize-handle.react-flow__resize-control.handle {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--surface-0);
+  border: 1.5px solid var(--accent);
+}
+
+.storm-wall .storm-resize-line.react-flow__resize-control.line {
+  border-color: var(--accent);
+}
+
+/* ---- The timeline above the stickies ---- */
+
+.storm-timeline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  color: var(--text-3);
+}
+
+.storm-timeline::before {
+  content: "";
+  flex: 1;
+  order: 2;
+  height: 0;
+  margin-left: 0.5rem;
+  border-top: 2px solid currentColor;
+}
+
+.storm-timeline::after {
+  content: "";
+  order: 3;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 12px solid currentColor;
+}
+
+.storm-timeline span {
+  order: 1;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---- The bar over a selection ---- */
+
+.storm-selection.react-flow__panel {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-md);
+}
+
+.storm-selection-swatches {
+  display: flex;
+  gap: 0.15rem;
+  padding-right: 0.3rem;
+  margin-right: 0.1rem;
+  border-right: 1px solid var(--border);
+}
+
+.storm-kind-btn,
+.storm-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: 1.7rem;
+  min-width: 1.7rem;
+  padding: 0 0.35rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.storm-kind-btn:hover,
+.storm-bar-btn:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.storm-kind-btn.on,
+.storm-bar-btn.on {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+
+.storm-bar-btn.danger:hover {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+}
+
+/* ---- Swatches ---- */
+
+.storm-swatch {
+  flex: none;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.storm-swatch-actor {
+  height: 9px;
+}
+
+.storm-swatch-aggregate {
+  width: 16px;
+  height: 16px;
+}
+
+.storm-swatch-external {
+  width: 18px;
+  height: 11px;
+}
+
+.storm-swatch-hotspot {
+  width: 11px;
+  height: 11px;
+  margin: 0 1.5px;
+  transform: rotate(45deg);
+}
+
+/* ---- The legend ---- */
+
+.storm-legend {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  overflow-y: auto;
+}
+
+.storm-legend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.storm-legend-title {
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.storm-legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.storm-legend-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.storm-legend-list li.off .storm-legend-add {
+  opacity: 0.45;
+}
+
+.storm-legend-add {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 1.85rem;
+  padding: 0 0.4rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.storm-legend-add:hover {
+  background: var(--hover);
+}
+
+.storm-legend-add .storm-swatch {
+  margin: 0 auto;
+}
+
+.storm-legend-add > .storm-swatch,
+.storm-legend-add > .storm-area-icon {
+  width: 18px;
+  flex: none;
+}
+
+.storm-legend-add > .storm-swatch {
+  width: 14px;
+  margin: 0 2px;
+}
+
+.storm-legend-add > .storm-swatch-aggregate { width: 16px; margin: 0 1px; }
+.storm-legend-add > .storm-swatch-external { width: 18px; margin: 0; }
+.storm-legend-add > .storm-swatch-hotspot { width: 11px; margin: 0 3.5px; }
+
+.storm-area-icon {
+  color: var(--text-3);
+}
+
+.storm-legend-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.storm-legend-add kbd {
+  flex: none;
+  min-width: 1.1rem;
+  padding: 0 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font: 500 0.6875rem/1.3 var(--font-mono);
+  text-align: center;
+  opacity: 0;
+}
+
+.storm-legend-add:hover kbd {
+  opacity: 1;
+}
+
+.storm-legend-count {
+  min-width: 1.4rem;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.storm-legend-eye.ibtn {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
+.storm-legend-tips {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.storm-legend-tips p {
+  margin: 0 0 0.35rem;
+}
+
+.storm-steps {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.storm-steps summary {
+  color: var(--text-1);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.storm-steps ol {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.storm-steps li {
+  margin-bottom: 0.3rem;
+}
+
+/* ---- An empty wall, and no board at all ---- */
+
+.storm-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 2rem;
+  color: var(--text-3);
+  text-align: center;
+  pointer-events: none;
+}
+
+.storm-empty p {
+  max-width: 26rem;
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.storm-welcome {
+  max-width: 40rem;
+  margin: 2.5rem auto;
+  padding: 0 1rem;
+  color: var(--text-2);
+}
+
+.storm-welcome > svg {
+  color: #ff922b;
+}
+
+.storm-welcome h1 {
+  margin: 0.5rem 0 0.4rem;
+  color: var(--text-1);
+  font-size: 1.5rem;
+}
+
+.storm-welcome p {
+  margin: 0 0 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.storm-welcome-legend {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0 0 1.4rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.storm-welcome-legend li {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr;
+  align-items: start;
+}
+
+.storm-welcome-legend .storm-swatch {
+  margin-top: 0.15rem;
+}
+
+.storm-welcome-legend strong {
+  color: var(--text-1);
+}
+
+.storm-welcome-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.storm-welcome-actions button {
+  height: 2rem;
+  padding: 0 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.storm-welcome-actions button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.storm-welcome-actions button.primary:hover {
+  background: var(--accent-hover);
+}
+
+@media (max-width: 900px) {
+  .storm-body {
+    grid-template-columns: 1fr;
+  }
+
+  .storm-legend {
+    display: none;
+  }
+}
