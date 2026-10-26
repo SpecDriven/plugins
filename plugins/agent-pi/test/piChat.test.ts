@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "@specdriven/app/src/server/api";
 import { endAllChatSessions } from "@specdriven/app/src/server/agentChat";
-import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentChat";
+import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentTypes";
 import { createFeature, saveFeature } from "@specdriven/app/src/server/features";
 import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
 import { writeState } from "@specdriven/app/src/server/state";
@@ -547,6 +547,6 @@ test("an unknown agent is refused, and Pi needs its CLI", async () => {
   expect(gone.status).toBe(502);
   expect((await gone.json()).error).toContain("Pi CLI not found");
   // The state says which agents this machine can run.
-  const state = (await (await api("/api/state")).json()) as { canRunPi: boolean };
-  expect(state.canRunPi).toBe(false);
+  const { agents } = (await (await api("/api/state")).json()) as { agents: { id: string; available: boolean }[] };
+  expect(agents.find((a) => a.id === "pi")?.available).toBe(false);
 });
