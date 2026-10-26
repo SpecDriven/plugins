@@ -1,0 +1,10 @@
+[install]
+# The Claude Agent SDK's optional per-platform packages stay out: the plugin
+# runs the developer's own `claude` (pathToClaudeCodeExecutable), and the
+# host bundle must carry nothing native.
+optional = false
+
+[test]
+# The app's test isolation, and settings folders of the tests' own
+# (test/preload.ts).
+preload = ["./test/preload.ts"]

@@ -1,0 +1,35 @@
+{
+  "name": "@specdriven/plugin-agent-codex",
+  "version": "1.0.0",
+  "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./dist/host.js"
+  },
+  "scripts": {
+    "build": "specdriven plugin build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "specdriven": {
+    "id": "agent-codex",
+    "api": "1",
+    "displayName": "Codex agent",
+    "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes",
+    "host": "./dist/host.js",
+    "src": {
+      "host": "./src/host.ts"
+    },
+    "minAppVersion": "0.1.184",
+    "defaultEnabled": true,
+    "autoEnable": true,
+    "permissions": [
+      "process:spawn"
+    ]
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^5"
+  }
+}

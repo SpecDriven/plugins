@@ -1,0 +1,33 @@
+{
+  // `@specdriven/host` and `@specdriven/client` are the app's own modules,
+  // and React is the app's React, shimmed over what the app publishes when
+  // the plugin is built. For the editor, the type checker and `bun test`
+  // they resolve to an app checkout beside this repository
+  // (../specdriven-app) — React too, so there is one React and one set of
+  // its types; point elsewhere with `--tsconfig-override <a tsconfig
+  // extending this one>`, which `bun test` takes as tsc takes `-p`.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noUncheckedIndexedAccess": true,
+    "types": ["bun"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@specdriven/host": ["../../../specdriven-app/src/plugins/sdk/host.ts"],
+      "@specdriven/client": ["../../../specdriven-app/src/plugins/sdk/client.ts"],
+      "@specdriven/app/*": ["../../../specdriven-app/*"],
+      "react": ["../../../specdriven-app/node_modules/@types/react", "../../../specdriven-app/node_modules/react"],
+      "react/*": ["../../../specdriven-app/node_modules/@types/react/*", "../../../specdriven-app/node_modules/react/*"],
+      "react-dom": ["../../../specdriven-app/node_modules/@types/react-dom", "../../../specdriven-app/node_modules/react-dom"],
+      "react-dom/*": ["../../../specdriven-app/node_modules/@types/react-dom/*", "../../../specdriven-app/node_modules/react-dom/*"]
+    }
+  },
+  "include": ["src", "test"]
+}
