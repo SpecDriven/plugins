@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { handleApi, reloader } from "@specdriven/app/src/server/api";
 import { createChatSession, endAllChatSessions, getChatEvents } from "@specdriven/app/src/server/agentChat";
-import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentChat";
+import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentTypes";
 import { createFeature, saveFeature } from "@specdriven/app/src/server/features";
 import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
 import { pluginSection } from "@specdriven/app/src/plugins/host/pluginSettings";
@@ -578,14 +578,16 @@ test("the pane is gated by the Settings switch and the CLI on PATH", async () =>
   expect((await off.json()).error).toContain("switched off in Settings");
   await writeState({ dataRepo: data, ...quietProfile(data) }, root);
 
-  const state = (await (await api("/api/state")).json()) as { canRunAgentPane: boolean };
-  expect(state.canRunAgentPane).toBe(true);
+  const claudeAvailable = async () => {
+    const { agents } = (await (await api("/api/state")).json()) as { agents: { id: string; available: boolean }[] };
+    return agents.find((a) => a.id === "claude")?.available;
+  };
+  expect(await claudeAvailable()).toBe(true);
   setClaudeAvailability(() => false);
   const noCli = await api("/api/agent/chat", "POST", { name: "chat", agent: "claude" });
   expect(noCli.status).toBe(502);
   expect((await noCli.json()).error).toContain("Claude CLI not found");
-  const again = (await (await api("/api/state")).json()) as { canRunAgentPane: boolean };
-  expect(again.canRunAgentPane).toBe(false);
+  expect(await claudeAvailable()).toBe(false);
   expect(fakes).toHaveLength(0);
 });
 
@@ -643,11 +645,11 @@ test("Start session can open the generated prompt in the pane", async () => {
   const res = await api("/api/agent/session", "POST", {
     name: "implement quotes",
     files: [{ fileName: "specs/quote.feature.md" }],
-    target: "pane",
+    target: "claude",
   });
   expect(res.status).toBe(200);
   const body = (await res.json()) as { id: string; name: string; target: string };
-  // "pane" is the pre-plugin name for Claude in the pane; the answer names the provider.
+  // The target is the provider id; the answer names it back.
   expect(body).toMatchObject({ name: "implement quotes", target: "claude" });
   const fake = fakes.at(-1)!;
   const first = await fake.input(1);
@@ -666,11 +668,12 @@ test("Start session can open the generated prompt in the pane", async () => {
   await until(() => snapshot(body.id), (s) => s.meta.agentSessionId === "claude-1");
   expect((await snapshot(body.id)).meta.status).toBe("running");
 
-  // "pane" is what the app stored before agents were providers; it is
-  // read as Claude and stored as such (src/server/agentLegacy.ts).
-  const stored = await api("/api/state", "PUT", { codeGenTarget: "pane" });
+  // The remembered "Run in" choice is the provider id; "pane", what the app
+  // stored before agents were providers, is no longer read.
+  const stored = await api("/api/state", "PUT", { codeGenTarget: "claude" });
   expect(stored.status).toBe(200);
   expect((await readState(root)).codeGenTarget).toBe("claude");
+  expect((await api("/api/state", "PUT", { codeGenTarget: "pane" })).status).toBe(400);
   expect(((await (await api("/api/state")).json()) as { codeGenTarget: string }).codeGenTarget).toBe("claude");
 });
 
