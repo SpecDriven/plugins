@@ -1,0 +1,35 @@
+{
+  "name": "@specdriven/plugin-agent-pi",
+  "version": "1.0.0",
+  "description": "pi.dev's coding agent in the coding agent pane — minimal, and it runs its own tools",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./dist/host.js"
+  },
+  "scripts": {
+    "build": "specdriven plugin build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "specdriven": {
+    "id": "agent-pi",
+    "api": "1",
+    "displayName": "Pi agent",
+    "description": "pi.dev's coding agent in the coding agent pane — minimal, and it runs its own tools",
+    "host": "./dist/host.js",
+    "src": {
+      "host": "./src/host.ts"
+    },
+    "minAppVersion": "0.1.184",
+    "defaultEnabled": true,
+    "autoEnable": true,
+    "permissions": [
+      "process:spawn"
+    ]
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^5"
+  }
+}
