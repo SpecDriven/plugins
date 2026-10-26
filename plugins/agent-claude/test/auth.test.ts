@@ -424,22 +424,24 @@ test("GET /api/claude/auth reports the mode, the login and the proxy — never a
   expect(await tokenStore().load()).toBeNull();
 });
 
-test("PUT /api/state stores the choice and the url, and null forgets them", async () => {
-  const chosen = await call("PUT", "/api/state", { claudeAuth: "login" });
+test("PUT /api/claude/settings stores the choice and the url, and null forgets them", async () => {
+  // The top-level keys the values lived under before the plugin are no settings any more.
+  expect((await call("PUT", "/api/state", { claudeAuth: "login" })).status).toBe(400);
+  const section = async () => pluginSection((await readState(root)) as Record<string, unknown>, "agent-claude");
+  const chosen = await call("PUT", "/api/claude/settings", { claudeAuth: "login" });
   expect(chosen.status).toBe(200);
   expect(chosen.body.claudeAuth).toBe("login");
-  expect((await readState(root)).claudeAuth).toBe("login");
-  expect((await call("PUT", "/api/state", { claudeAuth: "ldap" })).status).toBe(400);
-  expect((await call("PUT", "/api/state", { claudeProxyUrl: "localhost:6655" })).status).toBe(400);
-  const url = await call("PUT", "/api/state", { claudeAuth: "proxy", claudeProxyUrl: " http://proxy.test:9/ " });
+  expect((await section()).claudeAuth).toBe("login");
+  expect((await call("PUT", "/api/claude/settings", { claudeAuth: "ldap" })).status).toBe(400);
+  expect((await call("PUT", "/api/claude/settings", { claudeProxyUrl: "localhost:6655" })).status).toBe(400);
+  const url = await call("PUT", "/api/claude/settings", { claudeAuth: "proxy", claudeProxyUrl: " http://proxy.test:9/ " });
   expect(url.body.claudeProxyUrl).toBe("http://proxy.test:9/");
-  expect(await readState(root)).toMatchObject({ claudeAuth: "proxy", claudeProxyUrl: "http://proxy.test:9/" });
-  const forgotten = await call("PUT", "/api/state", { claudeAuth: null, claudeProxyUrl: null });
-  expect(forgotten.body.claudeAuth).toBeNull();
-  expect(forgotten.body.claudeProxyUrl).toBeNull();
-  const state = await readState(root);
-  expect(state.claudeAuth).toBeUndefined();
-  expect(state.claudeProxyUrl).toBeUndefined();
+  expect(await section()).toMatchObject({ claudeAuth: "proxy", claudeProxyUrl: "http://proxy.test:9/" });
+  const forgotten = await call("PUT", "/api/claude/settings", { claudeAuth: null, claudeProxyUrl: null });
+  expect(forgotten.body).toMatchObject({ claudeAuth: null, claudeProxyUrl: null });
+  const left = await section();
+  expect("claudeAuth" in left).toBe(false);
+  expect("claudeProxyUrl" in left).toBe(false);
   const written = JSON.parse(await readFile(join(root, ".specdriven", "settings.json"), "utf8")) as Record<string, unknown>;
   expect("claudeAuth" in written).toBe(false);
   expect("claudeProxyUrl" in written).toBe(false);
@@ -457,7 +459,7 @@ test("POST /api/claude/proxy/check reports on the proxy with the token in use", 
   try {
     const base = `http://127.0.0.1:${server.port}/`;
     expect((await call("POST", "/api/claude/proxy/check", {})).status).toBe(400);
-    await call("PUT", "/api/state", { claudeAuth: "proxy", claudeProxyUrl: base });
+    await call("PUT", "/api/claude/settings", { claudeAuth: "proxy", claudeProxyUrl: base });
     expect((await call("POST", "/api/claude/proxy/check", {})).body).toMatchObject({ url: base, result: "unauthorized" });
     await call("POST", "/api/claude/token", { token: "app-token" });
     expect((await call("POST", "/api/claude/proxy/check", {})).body).toMatchObject({ url: base, result: "ok" });
@@ -492,23 +494,23 @@ test("the demo and the hosted app have no Claude sign-in", async () => {
   process.env.DEMO_MODE = "1";
   expect((await call("GET", "/api/claude/auth")).status).toBe(403);
   expect((await call("POST", "/api/claude/token", { token: "x" })).status).toBe(403);
-  expect((await call("PUT", "/api/state", { claudeAuth: "login" })).status).toBe(403);
+  expect((await call("PUT", "/api/claude/settings", { claudeAuth: "login" })).status).toBe(403);
   delete process.env.DEMO_MODE;
   process.env.SPECDRIVEN_HOSTED = "1";
   expect((await call("GET", "/api/claude/auth")).status).toBe(403);
   expect((await call("POST", "/api/claude/login", { email: "ada@example.com" })).status).toBe(403);
-  expect((await call("PUT", "/api/state", { claudeProxyUrl: "http://x/" })).status).toBe(403);
+  expect((await call("PUT", "/api/claude/settings", { claudeProxyUrl: "http://x/" })).status).toBe(403);
 });
 
-// The Claude agent plugin's own settings (src/plugins/builtin/agent-claude/
-// settings.ts, specs/agents/agent-plugins.feature.md "The Settings page
+// The Claude agent plugin's own settings (src/settings.ts,
+// specs/agents/agent-plugins.feature.md "The Settings page
 // shows a plugin's section"): the sign-in, the proxy url and the pane's
 // first-response wait live in the plugin's section of settings.json, taken
 // over from the top-level keys once, and change through its own route.
 test("the plugin adopts the old top-level keys once, and PUT /api/claude/settings changes its own section", async () => {
   await unmount();
   await writeState(
-    { dataRepo: data, claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", agentFirstResponseSeconds: 30, ...quietProfile(data) },
+    { dataRepo: data, claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", agentFirstResponseSeconds: 30, ...quietProfile(data) } as unknown as Parameters<typeof writeState>[0],
     root,
   );
   unmount = await mountPlugin();
@@ -516,8 +518,8 @@ test("the plugin adopts the old top-level keys once, and PUT /api/claude/setting
   expect(adopted.pluginSettings).toEqual({
     "agent-claude": { adopted: true, claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", agentFirstResponseSeconds: 30 },
   });
-  // The old keys stay for the release that still reads them.
-  expect(adopted.claudeAuth).toBe("proxy");
+  // The old keys stay in the file; nothing reads them any more.
+  expect((adopted as Record<string, unknown>).claudeAuth).toBe("proxy");
   expect(claudeSettingsOf(pluginSection(adopted as Record<string, unknown>, "agent-claude"))).toEqual({ claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", firstResponseSeconds: 30 });
 
   const own = await call("GET", "/api/claude/settings");
@@ -529,23 +531,18 @@ test("the plugin adopts the old top-level keys once, and PUT /api/claude/setting
   // The section wins over the old keys; the default wait is stored as no key.
   const after = await readState(root);
   expect(after.pluginSettings).toEqual({ "agent-claude": { adopted: true, claudeAuth: "login", claudeProxyUrl: "http://new.test:9/" } });
-  expect(after.claudeAuth).toBe("proxy");
-  expect(((await call("GET", "/api/state")).body as { claudeAuth: string; agentFirstResponseSeconds: number })).toMatchObject({
-    claudeAuth: "login",
-    claudeProxyUrl: "http://new.test:9/",
-    agentFirstResponseSeconds: 15,
-  });
+  expect((after as Record<string, unknown>).claudeAuth).toBe("proxy");
   expect((await call("GET", "/api/claude/auth")).body).toMatchObject({ mode: "login", inferred: false, firstResponseSeconds: 15 });
 
-  // Null forgets a choice; a bad value is refused; the old PUT /api/state keys keep the section in step.
+  // Null forgets a choice; a bad value is refused; the old top-level keys are no settings any more.
   const forgotten = await call("PUT", "/api/claude/settings", { claudeAuth: null, claudeProxyUrl: null });
   expect(forgotten.body).toMatchObject({ claudeAuth: null, claudeProxyUrl: null });
   expect((await call("PUT", "/api/claude/settings", { claudeAuth: "ldap" })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", { firstResponseSeconds: -1 })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", {})).status).toBe(400);
-  await call("PUT", "/api/state", { claudeAuth: "proxy", agentFirstResponseSeconds: 5 });
-  expect((await readState(root)).pluginSettings).toEqual({ "agent-claude": { adopted: true, claudeAuth: "proxy", agentFirstResponseSeconds: 5 } });
-  expect((await call("GET", "/api/claude/settings")).body).toEqual({ claudeAuth: "proxy", claudeProxyUrl: null, firstResponseSeconds: 5 });
+  expect((await call("PUT", "/api/state", { claudeAuth: "proxy", agentFirstResponseSeconds: 5 })).status).toBe(400);
+  expect((await readState(root)).pluginSettings).toEqual({ "agent-claude": { adopted: true } });
+  expect((await call("GET", "/api/claude/settings")).body).toEqual({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15 });
 });
 
 test("a Claude plugin switched off takes its routes and its provider away", async () => {
