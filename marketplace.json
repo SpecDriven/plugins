@@ -28,6 +28,42 @@
       "version": "0.1.0",
       "category": "samples",
       "api": "1"
+    },
+    {
+      "name": "agent-claude",
+      "source": "./plugins/agent-claude",
+      "description": "Claude Code in the coding agent pane — the chat, its permissions and slash commands — with how it signs in (your Claude account or an API proxy) in Settings",
+      "version": "1.0.0",
+      "category": "agents",
+      "api": "1",
+      "agent": {
+        "id": "claude",
+        "command": "claude"
+      }
+    },
+    {
+      "name": "agent-codex",
+      "source": "./plugins/agent-codex",
+      "description": "OpenAI Codex in the coding agent pane, over the Codex CLI's app server",
+      "version": "1.0.0",
+      "category": "agents",
+      "api": "1",
+      "agent": {
+        "id": "codex",
+        "command": "codex"
+      }
+    },
+    {
+      "name": "agent-pi",
+      "source": "./plugins/agent-pi",
+      "description": "Pi in the coding agent pane, over the Pi CLI's RPC mode",
+      "version": "1.0.0",
+      "category": "agents",
+      "api": "1",
+      "agent": {
+        "id": "pi",
+        "command": "pi"
+      }
     }
   ]
 }
