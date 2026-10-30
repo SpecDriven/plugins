@@ -1,6 +1,6 @@
 {
   "name": "@specdriven/plugin-agent-codex",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes",
   "type": "module",
   "private": true,

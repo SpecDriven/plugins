@@ -30,6 +30,8 @@ import { CODEX_BIN } from "./cli";
 export interface CodexProcess {
   /** Write one framed message; a dead pipe is not an error worth throwing. */
   write(text: string): void;
+  /** Close stdin: `codex exec -` reads its prompt up to the end of it. */
+  end(): void;
   kill(): void;
 }
 
@@ -68,6 +70,13 @@ const nodeSpawn: CodexSpawn = (o) => {
         // Gone; onExit says so.
       }
     },
+    end: () => {
+      try {
+        child.stdin.end();
+      } catch {
+        // Gone; onExit says so.
+      }
+    },
     kill: () => child.kill(),
   };
 };
@@ -80,6 +89,11 @@ export function setCodexSpawn(fn: CodexSpawn | null): CodexSpawn | null {
   const previous = spawner;
   spawner = fn;
   return previous;
+}
+
+/** The spawner in force: the test's fake when one is set, else a real subprocess. */
+export function codexSpawner(): CodexSpawn {
+  return spawner ?? nodeSpawn;
 }
 
 // --- The client -------------------------------------------------------------

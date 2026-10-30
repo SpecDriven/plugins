@@ -7,7 +7,9 @@ slash commands. It was built into SpecDriven through 0.1.184; this plugin takes 
 over, installed by the app itself where it finds `codex` on PATH.
 
 What it adds to the app: the `codex` provider on the agent registry. It
-keeps no settings and no secrets; Codex's own login is the CLI's.
+also answers the app's one-shot turns (an estimate, say) through `codex
+exec`, read-only and without a session on disk. It keeps no settings and
+no secrets; Codex's own login is the CLI's.
 
 ## Layout
 
@@ -15,6 +17,7 @@ keeps no settings and no secrets; Codex's own login is the CLI's.
 src/host.ts        the host half: registers the provider
 src/provider.ts    the AgentProvider over the app server
 src/codexChat.ts   the app-server protocol: the stream, its notifications, policies and answers
+src/oneShot.ts     one-shot turns over `codex exec`
 src/cli.ts         the codex command and a test seam for its availability
 test/              bun test, against an app checkout
 ```
