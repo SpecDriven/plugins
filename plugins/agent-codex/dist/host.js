@@ -34,14 +34,19 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins/plugins/agent-codex/src/cli.ts
+// src/cli.ts
 var CODEX_BIN = "codex";
 var probe = null;
 function codexAvailable() {
   return probe ? probe() : which(CODEX_BIN) !== null;
 }
 
-// ../../../../plugins/plugins/agent-codex/src/codexChat.ts
+// src/oneShot.ts
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// src/codexChat.ts
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 var nodeSpawn = (o) => {
@@ -63,10 +68,18 @@ var nodeSpawn = (o) => {
         child.stdin.write(text);
       } catch {}
     },
+    end: () => {
+      try {
+        child.stdin.end();
+      } catch {}
+    },
     kill: () => child.kill()
   };
 };
 var spawner = null;
+function codexSpawner() {
+  return spawner ?? nodeSpawn;
+}
 var CODEX_REQUEST_TIMEOUT_MS = 20000;
 var CODEX_CLIENT_INFO = { name: "specdriven", title: "SpecDriven", version: "0" };
 
@@ -541,7 +554,187 @@ function codexAnswers(questions, answers) {
   return { answers: out };
 }
 
-// ../../../../plugins/plugins/agent-codex/src/provider.ts
+// src/oneShot.ts
+var KILL_GRACE_MS = 3000;
+var STDERR_TAIL = 5;
+function codexExecArgs(cwd, outFile, schemaFile, model) {
+  return [
+    "exec",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "-s",
+    "read-only",
+    "-C",
+    cwd,
+    "--color",
+    "never",
+    "--json",
+    ...model ? ["-m", model] : [],
+    ...schemaFile ? ["--output-schema", schemaFile] : [],
+    "-o",
+    outFile,
+    "-"
+  ];
+}
+function strictSchema(schema) {
+  if (Array.isArray(schema))
+    return schema.map(strictSchema);
+  if (!schema || typeof schema !== "object")
+    return schema;
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    out[key] = key === "properties" && value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, strictSchema(v)])) : strictSchema(value);
+  }
+  if (out.type === "object" && out.properties && typeof out.properties === "object") {
+    out.additionalProperties = false;
+    out.required = Object.keys(out.properties);
+  }
+  return out;
+}
+function codexExecPrompt(req) {
+  return `${req.systemPrompt}
+
+${req.prompt}`;
+}
+function eventError(line) {
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!event || typeof event !== "object")
+    return null;
+  if (event.type === "error" && typeof event.message === "string")
+    return event.message;
+  if (event.type === "turn.failed" && typeof event.error?.message === "string")
+    return event.error.message;
+  return null;
+}
+function readableError(raw) {
+  let text2 = raw;
+  for (let i = 0;i < 4; i++) {
+    try {
+      const parsed = JSON.parse(text2);
+      const inner = parsed?.error?.message ?? parsed?.message;
+      if (typeof inner !== "string")
+        break;
+      text2 = inner;
+    } catch {
+      break;
+    }
+  }
+  return text2.length > 400 ? `${text2.slice(0, 400)}…` : text2;
+}
+async function codexOneShot(req) {
+  if (req.signal?.aborted)
+    return { text: "Codex was stopped", isError: true };
+  const dir = await mkdtemp(join(tmpdir(), "specdriven-codex-oneshot-"));
+  try {
+    const outFile = join(dir, "last-message.txt");
+    let schemaFile = null;
+    if (req.schema) {
+      schemaFile = join(dir, "schema.json");
+      await writeFile(schemaFile, JSON.stringify(strictSchema(req.schema)), "utf8");
+    }
+    const outcome = await runExec(req, codexExecArgs(req.cwd, outFile, schemaFile, req.model));
+    if (outcome.error) {
+      return { text: withTail(`Could not start Codex: ${outcome.error.message}`, outcome.stderrTail), isError: true };
+    }
+    if (outcome.killed === "timeout")
+      return { text: "Codex did not answer in time", isError: true };
+    if (outcome.killed === "abort")
+      return { text: "Codex was stopped", isError: true };
+    const reported = outcome.errors.length ? readableError(outcome.errors[outcome.errors.length - 1]) : "";
+    if (outcome.code !== 0) {
+      return { text: reported || outcome.stderrTail || `Codex exited with code ${outcome.code}`, isError: true };
+    }
+    const text2 = (await readFile(outFile, "utf8").catch(() => "")).trim();
+    if (!text2)
+      return { text: reported || outcome.stderrTail || "Codex gave no answer", isError: true };
+    return { text: text2, ...req.schema ? { structured: parseJson(text2) } : {}, isError: false };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+function withTail(text2, tail) {
+  return tail ? `${text2}
+${tail}` : text2;
+}
+function parseJson(text2) {
+  try {
+    return JSON.parse(text2);
+  } catch {
+    return;
+  }
+}
+function runExec(req, args) {
+  return new Promise((resolve) => {
+    let stderr = [];
+    let stderrRest = "";
+    const errors = [];
+    let stdoutRest = "";
+    let killed = null;
+    let settled = false;
+    let grace = null;
+    let timer = null;
+    const finish = (code, error) => {
+      if (settled)
+        return;
+      settled = true;
+      if (timer)
+        clearTimeout(timer);
+      if (grace)
+        clearTimeout(grace);
+      req.signal?.removeEventListener("abort", onAbort);
+      const tail = [...stderr, stderrRest].filter((line) => line.trim()).slice(-STDERR_TAIL);
+      const last = eventError(stdoutRest);
+      if (last)
+        errors.push(last);
+      resolve({ code, ...error ? { error } : {}, killed, stderrTail: tail.join(`
+`).trim(), errors });
+    };
+    const child = codexSpawner()({
+      bin: which(CODEX_BIN) ?? CODEX_BIN,
+      args,
+      cwd: req.cwd,
+      env: process.env,
+      onStdout: (chunk) => {
+        const lines = (stdoutRest + chunk).split(`
+`);
+        stdoutRest = lines.pop() ?? "";
+        for (const line of lines) {
+          const message = eventError(line);
+          if (message)
+            errors.push(message);
+        }
+      },
+      onStderr: (chunk) => {
+        const lines = (stderrRest + chunk).split(`
+`);
+        stderrRest = lines.pop() ?? "";
+        stderr = [...stderr, ...lines].slice(-STDERR_TAIL);
+      },
+      onExit: finish
+    });
+    const kill = (why) => {
+      if (settled || killed)
+        return;
+      killed = why;
+      child.kill();
+      grace = setTimeout(() => finish(null), KILL_GRACE_MS);
+    };
+    const onAbort = () => kill("abort");
+    if (settled)
+      return;
+    timer = setTimeout(() => kill("timeout"), req.timeoutMs);
+    req.signal?.addEventListener("abort", onAbort, { once: true });
+    child.write(codexExecPrompt(req));
+    child.end();
+  });
+}
+
+// src/provider.ts
 var CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
 var str = (value) => typeof value === "string" ? value : null;
 var rec = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -832,7 +1025,7 @@ var codexProvider = {
     canChangeModeMidSession: true,
     hasAccount: false,
     rememberPermissions: "session",
-    oneShot: false
+    oneShot: true
   },
   defaultPermissionMode: "default",
   loginHint: {
@@ -851,10 +1044,11 @@ var codexProvider = {
     opts.signal.addEventListener("abort", () => session.close(), { once: true });
     session.ready(opts.prompt);
     return session;
-  }
+  },
+  oneShot: codexOneShot
 };
 
-// ../../../../plugins/plugins/agent-codex/src/host.ts
+// src/host.ts
 var plugin = {
   name: "agent-codex",
   inject: ["agents"],
@@ -868,5 +1062,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=8DAE1E89E9EFADA664756E2164756E21
+//# debugId=121825FB8A1B868264756E2164756E21
 //# sourceMappingURL=host.js.map

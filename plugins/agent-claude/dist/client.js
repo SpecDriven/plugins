@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// ../../../../plugins/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 
 // specdriven-shim:react/jsx-runtime
@@ -77,7 +77,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// ../../../../plugins/plugins/agent-claude/src/ui/ClaudeSettings.tsx
+// src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -577,7 +577,7 @@ function ClaudeProxy({
   });
 }
 
-// ../../../../plugins/plugins/agent-claude/src/client.tsx
+// src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection(_props) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {});
@@ -603,5 +603,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=D2C87D10F828D65E64756E2164756E21
+//# debugId=1E91E33AE27BC3C364756E2164756E21
 //# sourceMappingURL=client.js.map
