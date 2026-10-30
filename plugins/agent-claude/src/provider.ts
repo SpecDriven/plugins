@@ -710,6 +710,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
             // Leaves nothing in ~/.claude/projects: this is not a session.
             persistSession: false,
             thinking: { type: "disabled" },
+            ...(req.model ? { model: req.model } : {}),
             ...(req.schema ? { outputFormat: { type: "json_schema", schema: req.schema } } : {}),
             abortController,
             env: launch.env,

@@ -25,7 +25,7 @@ const KILL_GRACE_MS = 3000;
 const STDERR_TAIL = 5;
 
 /** The `codex exec` argv for one turn; the prompt itself comes on stdin (`-`). */
-export function codexExecArgs(cwd: string, outFile: string, schemaFile: string | null): string[] {
+export function codexExecArgs(cwd: string, outFile: string, schemaFile: string | null, model?: string): string[] {
   return [
     "exec",
     "--ephemeral",
@@ -37,6 +37,7 @@ export function codexExecArgs(cwd: string, outFile: string, schemaFile: string |
     "--color",
     "never",
     "--json",
+    ...(model ? ["-m", model] : []),
     ...(schemaFile ? ["--output-schema", schemaFile] : []),
     "-o",
     outFile,
@@ -123,7 +124,7 @@ export async function codexOneShot(req: OneShotRequest): Promise<OneShotResult> 
       schemaFile = join(dir, "schema.json");
       await writeFile(schemaFile, JSON.stringify(strictSchema(req.schema)), "utf8");
     }
-    const outcome = await runExec(req, codexExecArgs(req.cwd, outFile, schemaFile));
+    const outcome = await runExec(req, codexExecArgs(req.cwd, outFile, schemaFile, req.model));
     if (outcome.error) {
       return { text: withTail(`Could not start Codex: ${outcome.error.message}`, outcome.stderrTail), isError: true };
     }

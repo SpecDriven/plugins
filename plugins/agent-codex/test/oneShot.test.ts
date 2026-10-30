@@ -9,7 +9,7 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { setCodexSpawn } from "../src/codexChat";
 import type { CodexSpawnOptions } from "../src/codexChat";
-import { codexOneShot, eventError, strictSchema } from "../src/oneShot";
+import { codexExecArgs, codexOneShot, eventError, strictSchema } from "../src/oneShot";
 import { codexProvider } from "../src/provider";
 
 /** A stand-in for `codex exec`: it records what it was given and exits when told. */
@@ -139,6 +139,16 @@ test("no schema: no --output-schema, and no structured answer", async () => {
   const result = await turn;
   expect(result).toEqual({ text: "Three hours.", isError: false });
   expect("structured" in result).toBe(false);
+});
+
+test("a model asked for goes to codex exec as -m; none asked for leaves Codex's own default", async () => {
+  const turn = codexOneShot(request({ model: "gpt-5.1-codex" }));
+  const fake = await spawned;
+  expect(fake.arg("-m")).toBe("gpt-5.1-codex");
+  expect(fake.options.args.at(-1)).toBe("-");
+  await fake.answer("ok");
+  await turn;
+  expect(codexExecArgs("/w", "/o", null)).not.toContain("-m");
 });
 
 test("an answer that is not JSON under a schema keeps the text and leaves structured undefined", async () => {
