@@ -377,6 +377,8 @@ class FakeCodex {
     }
   }
 
+  end(): void {}
+
   kill(): void {
     this.killed = true;
     this.exit(0);

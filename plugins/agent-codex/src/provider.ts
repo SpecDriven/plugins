@@ -4,7 +4,8 @@
 // for on the way arrive as requests from the server, which the pane's
 // permission cards answer. Codex has no permission modes but an approval
 // policy and a sandbox; the pane's modes map onto those (codexPolicy) and
-// travel with every turn. An AgentProvider (src/plugins/host/agents.ts).
+// travel with every turn. An AgentProvider (src/plugins/host/agents.ts);
+// its one-shot turns run `codex exec` instead (src/oneShot.ts).
 //
 // Node APIs only (src/server/run.ts): this module also runs under Electron.
 
@@ -20,6 +21,7 @@ import type {
   PermissionSuggestion,
 } from "@specdriven/host";
 import { CODEX_BIN, codexAvailable } from "./cli";
+import { codexOneShot } from "./oneShot";
 import {
   CODEX_CLIENT_INFO,
   CODEX_TOOL,
@@ -381,7 +383,7 @@ export const codexProvider: AgentProvider = {
     canChangeModeMidSession: true,
     hasAccount: false,
     rememberPermissions: "session",
-    oneShot: false,
+    oneShot: true,
   },
   defaultPermissionMode: "default",
   loginHint: {
@@ -404,4 +406,7 @@ export const codexProvider: AgentProvider = {
     void session.ready(opts.prompt);
     return session;
   },
+  // The app's one-shot turns (an estimate, say) go through `codex exec`,
+  // read-only and without a session: src/oneShot.ts.
+  oneShot: codexOneShot,
 };

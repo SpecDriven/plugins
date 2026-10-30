@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// ../../../../plugins/plugins/agent-claude/src/host.ts
+// src/host.ts
 import { homedir as homedir2 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44568,20 +44568,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// ../../../../plugins/plugins/agent-claude/src/cli.ts
+// src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeAvailable() {
   return probe ? probe() : which(CLAUDE_BIN) !== null;
 }
 
-// ../../../../plugins/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44656,7 +44656,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// ../../../../plugins/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 class ClaudeAuthError extends Error {
   status;
   constructor(message, status) {
@@ -44919,7 +44919,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// ../../../../plugins/plugins/agent-claude/src/provider.ts
+// src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45406,6 +45406,7 @@ function createClaudeProvider(options = {}) {
             settingSources: [],
             persistSession: false,
             thinking: { type: "disabled" },
+            ...req.model ? { model: req.model } : {},
             ...req.schema ? { outputFormat: { type: "json_schema", schema: req.schema } } : {},
             abortController,
             env: launch.env,
@@ -45429,7 +45430,7 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// ../../../../plugins/plugins/agent-claude/src/host.ts
+// src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -45577,5 +45578,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=5D6181A0348EE4C464756E2164756E21
+//# debugId=281F2F7975423C1464756E2164756E21
 //# sourceMappingURL=host.js.map
