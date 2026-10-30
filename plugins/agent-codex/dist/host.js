@@ -34,19 +34,19 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins/plugins/agent-codex/src/cli.ts
+// src/cli.ts
 var CODEX_BIN = "codex";
 var probe = null;
 function codexAvailable() {
   return probe ? probe() : which(CODEX_BIN) !== null;
 }
 
-// ../../../../plugins/plugins/agent-codex/src/oneShot.ts
+// src/oneShot.ts
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// ../../../../plugins/plugins/agent-codex/src/codexChat.ts
+// src/codexChat.ts
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 var nodeSpawn = (o) => {
@@ -554,10 +554,10 @@ function codexAnswers(questions, answers) {
   return { answers: out };
 }
 
-// ../../../../plugins/plugins/agent-codex/src/oneShot.ts
+// src/oneShot.ts
 var KILL_GRACE_MS = 3000;
 var STDERR_TAIL = 5;
-function codexExecArgs(cwd, outFile, schemaFile) {
+function codexExecArgs(cwd, outFile, schemaFile, model) {
   return [
     "exec",
     "--ephemeral",
@@ -569,6 +569,7 @@ function codexExecArgs(cwd, outFile, schemaFile) {
     "--color",
     "never",
     "--json",
+    ...model ? ["-m", model] : [],
     ...schemaFile ? ["--output-schema", schemaFile] : [],
     "-o",
     outFile,
@@ -636,7 +637,7 @@ async function codexOneShot(req) {
       schemaFile = join(dir, "schema.json");
       await writeFile(schemaFile, JSON.stringify(strictSchema(req.schema)), "utf8");
     }
-    const outcome = await runExec(req, codexExecArgs(req.cwd, outFile, schemaFile));
+    const outcome = await runExec(req, codexExecArgs(req.cwd, outFile, schemaFile, req.model));
     if (outcome.error) {
       return { text: withTail(`Could not start Codex: ${outcome.error.message}`, outcome.stderrTail), isError: true };
     }
@@ -733,7 +734,7 @@ function runExec(req, args) {
   });
 }
 
-// ../../../../plugins/plugins/agent-codex/src/provider.ts
+// src/provider.ts
 var CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
 var str = (value) => typeof value === "string" ? value : null;
 var rec = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -1047,7 +1048,7 @@ var codexProvider = {
   oneShot: codexOneShot
 };
 
-// ../../../../plugins/plugins/agent-codex/src/host.ts
+// src/host.ts
 var plugin = {
   name: "agent-codex",
   inject: ["agents"],
@@ -1061,5 +1062,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=F79C6006A05062BE64756E2164756E21
+//# debugId=121825FB8A1B868264756E2164756E21
 //# sourceMappingURL=host.js.map
