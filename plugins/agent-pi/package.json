@@ -1,6 +1,7 @@
 {
   "name": "@specdriven/plugin-agent-pi",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "description": "pi.dev's coding agent in the coding agent pane — minimal, and it runs its own tools",
   "type": "module",
   "private": true,

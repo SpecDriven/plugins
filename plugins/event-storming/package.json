@@ -1,6 +1,7 @@
 {
   "name": "@specdriven/plugin-event-storming",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "description": "Classic Event Storming: a wall of sticky notes for exploring a domain",
   "type": "module",
   "private": true,
