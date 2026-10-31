@@ -27,3 +27,7 @@ and the command it needs on PATH. The app looks for those commands on this
 machine and installs the plugin for each it finds, so a developer with
 `codex` installed gets Codex in the pane without a visit to the marketplace;
 the pane's empty state offers the rest.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

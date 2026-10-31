@@ -1,6 +1,7 @@
 {
   "name": "@specdriven/plugin-models",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "description": "Event Models drawn on a canvas, sliced into specs",
   "type": "module",
   "private": true,
