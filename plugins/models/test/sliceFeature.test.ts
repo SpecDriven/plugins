@@ -210,7 +210,8 @@ describe("generateSliceFeature", () => {
     expect(made.model.file.links["add-item"]).toEqual({ feature: "specs/add-item-to-cart.feature.md" });
     const text = (await readFeature(root, made.fileName))!;
     expect(text).toStartWith("# Add item to cart\n\nScenarios of the slice “Add item to cart”");
-    expect(text).toContain("## adds the item @v1 [proposed]");
+    // Apps since scenario numbering write `## S1: …`; older ones `## …`.
+    expect(text).toMatch(/^## (S1: )?adds the item @v1 \[proposed\]$/m);
     // The link is in the model's file and its listing.
     expect((await readModel(root, modelFile))!.file.links["add-item"]?.feature).toBe(made.fileName);
     expect((await listModels(root))[0]!.links).toEqual([

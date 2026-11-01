@@ -1,0 +1,120 @@
+name: CI
+
+# Every released app reads marketplace.json from this repository's main and
+# installs the plugins' dist/ as committed, so a merge here is a release.
+# This checks each listed plugin inside the app it claims to run in:
+#
+#   floor    the app at v<minAppVersion>: the plugin's floor is honest
+#   release  the newest app release: what users have; dist/ is up to date
+#   main     the app's main: a change there that breaks a plugin shows up
+#            before it ships (reported on pull requests, required nightly)
+#
+# The app is checked out beside this repository (specdriven-app/ next to
+# plugins/), where the plugins' tsconfig paths and the scripts look for it.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: 1.3.14
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      release: ${{ steps.matrix.outputs.release }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - id: matrix
+        run: bun scripts/ci-matrix.ts
+
+  index:
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: plugins
+      - uses: actions/checkout@v5
+        with:
+          repository: SpecDriven/specdriven-app
+          ref: ${{ needs.matrix.outputs.release }}
+          path: specdriven-app
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install the app
+        working-directory: specdriven-app
+        run: bun install --ignore-scripts
+      - name: Check marketplace.json
+        working-directory: plugins
+        run: bun scripts/check-index.ts
+
+  plugin:
+    needs: matrix
+    name: ${{ matrix.plugin }} · ${{ matrix.kind }}
+    runs-on: ubuntu-latest
+    # The app's main is a warning on pull requests: a plugin cannot fix an
+    # app change that has not shipped. The nightly run requires it.
+    continue-on-error: ${{ matrix.kind == 'main' && github.event_name != 'schedule' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: plugins
+      - uses: actions/checkout@v5
+        with:
+          repository: SpecDriven/specdriven-app
+          ref: ${{ matrix.appRef }}
+          path: specdriven-app
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install the app (${{ matrix.appRef }})
+        working-directory: specdriven-app
+        run: bun install --ignore-scripts
+      - name: Install the plugin
+        working-directory: plugins/${{ matrix.dir }}
+        run: |
+          if [ -f bun.lock ]; then bun install --frozen-lockfile; else bun install; fi
+      - name: Type check
+        working-directory: plugins/${{ matrix.dir }}
+        run: bunx tsc --noEmit -p .
+      - name: Test
+        working-directory: plugins/${{ matrix.dir }}
+        run: |
+          if [ -d test ]; then bun test --timeout 20000; else echo "no tests"; fi
+      - name: dist/ matches src/
+        if: matrix.kind == 'release'
+        working-directory: plugins
+        run: bun scripts/check-dist.ts ${{ matrix.dir }}
+
+  # One check to require on main: the index and every floor and release row.
+  ci:
+    if: always()
+    needs: [index, plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Index and plugins passed
+        run: |
+          echo "index: ${{ needs.index.result }}, plugins: ${{ needs.plugin.result }}"
+          [ "${{ needs.index.result }}" = success ] && [ "${{ needs.plugin.result }}" = success ]
