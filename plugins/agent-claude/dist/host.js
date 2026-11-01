@@ -11785,7 +11785,7 @@ function dn(e) {
 function or(e) {
   return e.length > 0 && e.every(dn);
 }
-function rm2(e) {
+function rm3(e) {
   return Is(e).some((t) => t.endsWith(".jsonl"));
 }
 function Is(e) {
@@ -11981,7 +11981,7 @@ function tS(e, t) {
     return q(e, P1e);
   if (L1e(t))
     return q(e, D1e);
-  return rm2(t) ? q(e, sm) : undefined;
+  return rm3(t) ? q(e, sm) : undefined;
 }
 function $1e(e) {
   return z1e(`${e}.json`);
@@ -11990,7 +11990,7 @@ function z1e(e) {
   return Is(e).includes(U1e);
 }
 function nS(e) {
-  return Array.isArray(e) && e.some((t) => typeof t === "string" && rm2(t));
+  return Array.isArray(e) && e.some((t) => typeof t === "string" && rm3(t));
 }
 function j1e(e) {
   return e === "user" || e === "project" || e === "local";
@@ -13828,7 +13828,7 @@ function L3(e) {
 }
 function U3(e) {
   let t = N3(e);
-  if (rm2(t))
+  if (rm3(t))
     return;
   let n = vt(), r = [t], o = M3(e);
   while (o !== n && r.length <= m2e + 1) {
@@ -44530,7 +44530,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
 });
 
 // src/host.ts
-import { homedir as homedir2 } from "node:os";
+import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
 var m = globalThis.__specdriven?.modules?.["@specdriven/host"];
@@ -44571,14 +44571,169 @@ var writeTextFile = m.writeTextFile;
 // src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
+
+// src/binary.ts
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { gunzipSync } from "node:zlib";
+// src/binaries.json
+var binaries_default = {
+  version: "0.3.261",
+  packages: {
+    "darwin-arm64": "sha512-oI8SPd6g+xUF6EnEqIInxz5CjSSJXoDlaqefjbSJvTFCawGGBhxlQs0g9jzsYou6Rdu+i2tJBToJZLsKSnN/0Q==",
+    "darwin-x64": "sha512-PODd45XbrKxwngebFmc60Xd68QDb7xCo+0toYTJKfFumU24b/JT2WpO5sTSfc5+fahd/P11q0uF5v9YeSjWmjg==",
+    "linux-x64": "sha512-MdojjfN0HJHT0JMiZJ6rTj3/ODNi5OdY0py1JZmVVEVTYOdvgH6OG3oy9/BmmJTx0mp/BBCHbOGNpibtnqE+1g==",
+    "linux-arm64": "sha512-C+y3N3MD2ExrwrbCYcbLdM39VkbJkQKUv23oubvoZr0CtHiH2LESyUUC3JsUbHJ1TRKO8fbzLqvPkjZ9UsBIcw==",
+    "linux-x64-musl": "sha512-H7sCtM7X9OyQ+ZCEhh6TY/Z1i+5WIn8YyHRVJ2LrZRFOaszPeDbl1SzSxxuOd5ibwJZA9gx+2uQ78dx+bDkQUA==",
+    "linux-arm64-musl": "sha512-BAUG2EremVyy8bA14jKF35VRJjGE2TqREpFerA0CRBWg9/sUJZVWdmIRXUiXCKh0MvenPRUJbEgwcHFllQETOw==",
+    "win32-x64": "sha512-tepSwNpNsl4tyDdJ1+YcRXeY7VZNirPqpCtKDuh2YVwDkMfzQevCqojURtACAdLwI8BUXeOGaecwRbh3zoSUtA==",
+    "win32-arm64": "sha512-zvZfec4+wDooqF/ZOI3lthgq9WfZLIrSserS6tULpBqCLKNRbTIpARDcljY7SrRuMGb3Ex+LFn/yXazgajpwzg=="
+  }
+};
+
+// src/binary.ts
+var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
+var BINARY_PLATFORMS = [
+  "darwin-arm64",
+  "darwin-x64",
+  "linux-x64",
+  "linux-arm64",
+  "linux-x64-musl",
+  "linux-arm64-musl",
+  "win32-x64",
+  "win32-arm64"
+];
+var REGISTRY = "https://registry.npmjs.org";
+var BINARY_PINS = binaries_default;
+function isMusl() {
+  if (process.platform !== "linux")
+    return false;
+  try {
+    const report = process.report?.getReport();
+    return report?.header?.glibcVersionRuntime === undefined;
+  } catch {
+    return false;
+  }
+}
+function binaryPlatform(platform = process.platform, arch = process.arch, musl = isMusl()) {
+  const key = platform === "linux" && musl ? `linux-${arch}-musl` : `${platform}-${arch}`;
+  return BINARY_PLATFORMS.includes(key) ? key : null;
+}
+function binaryPath(platform = binaryPlatform()) {
+  if (!platform || !BINARY_PINS.packages[platform])
+    return null;
+  const home = process.env.SPECDRIVEN_HOME || join(homedir(), ".specdriven");
+  return join(home, "claude-code", BINARY_PINS.version, platform, platform.startsWith("win32") ? "claude.exe" : "claude");
+}
+function installedBinary() {
+  const path = binaryPath();
+  return path && existsSync(path) ? path : null;
+}
+function canFetchBinary() {
+  return binaryPath() !== null;
+}
+var pending = null;
+var progress = null;
+function binaryDownload() {
+  return progress ? { ...progress } : null;
+}
+function fetchBinary(deps = {}) {
+  pending ??= download(deps).finally(() => {
+    pending = null;
+    progress = null;
+  });
+  return pending;
+}
+async function download(deps) {
+  const platform = deps.platform === undefined ? binaryPlatform() : deps.platform;
+  const target = binaryPath(platform);
+  const integrity = platform ? BINARY_PINS.packages[platform] : undefined;
+  if (!platform || !target || !integrity) {
+    throw new Error(`Claude Code is not published for ${process.platform}-${process.arch} — install the claude command instead`);
+  }
+  if (existsSync(target))
+    return target;
+  const name = `${SDK_PACKAGE}-${platform}`;
+  const url = `${REGISTRY}/${name}/-/${name.split("/")[1]}-${BINARY_PINS.version}.tgz`;
+  let res;
+  try {
+    res = await (deps.fetch ?? fetch)(url);
+  } catch (e) {
+    throw new Error(`Could not download Claude Code: ${e.message}`);
+  }
+  if (!res.ok || !res.body)
+    throw new Error(`Could not download Claude Code: HTTP ${res.status}`);
+  progress = { receivedBytes: 0, totalBytes: Number(res.headers.get("content-length")) || null };
+  const hash = createHash("sha512");
+  const chunks = [];
+  const reader = res.body.getReader();
+  for (;; ) {
+    const { done, value } = await reader.read();
+    if (done)
+      break;
+    hash.update(value);
+    chunks.push(value);
+    progress.receivedBytes += value.byteLength;
+  }
+  if (`sha512-${hash.digest("base64")}` !== integrity) {
+    throw new Error("The downloaded Claude Code does not match its pinned checksum, so it was not installed");
+  }
+  const file = tarEntry(gunzipSync(Buffer.concat(chunks)), `package/${basename(target)}`);
+  if (!file)
+    throw new Error(`The Claude Code package for ${platform} has no ${basename(target)}`);
+  await mkdir(dirname(target), { recursive: true });
+  const partial = `${target}.${process.pid}.partial`;
+  try {
+    await writeFile(partial, file, { mode: 493 });
+    await rename(partial, target);
+  } catch (e) {
+    await rm(partial, { force: true });
+    throw e;
+  }
+  return target;
+}
+function tarEntry(tar, wanted) {
+  const text = (from, length) => {
+    let end = from;
+    while (end < from + length && tar[end] !== 0)
+      end++;
+    return Buffer.from(tar.subarray(from, end)).toString("utf8");
+  };
+  let offset = 0;
+  let longName = null;
+  while (offset + 512 <= tar.length && tar[offset] !== 0) {
+    const size = parseInt(text(offset + 124, 12).trim() || "0", 8);
+    const type = String.fromCharCode(tar[offset + 156] || 48);
+    const prefix = text(offset + 257, 6) === "ustar" ? text(offset + 345, 155) : "";
+    const name = longName ?? (prefix ? `${prefix}/${text(offset, 100)}` : text(offset, 100));
+    longName = null;
+    const start = offset + 512;
+    if (type === "L")
+      longName = text(start, size);
+    else if (type === "x")
+      longName = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(text(start, size))?.[1] ?? null;
+    else if (type === "0" && name === wanted)
+      return tar.subarray(start, start + size);
+    offset = start + Math.ceil(size / 512) * 512;
+  }
+  return null;
+}
 
 // src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
+function claudeExecutable() {
+  if (probe)
+    return probe() ? CLAUDE_BIN : null;
+  return which(CLAUDE_BIN) ?? installedBinary();
+}
 function claudeAvailable() {
-  return probe ? probe() : which(CLAUDE_BIN) !== null;
+  return claudeExecutable() !== null;
 }
 
 // src/settings.ts
@@ -44665,7 +44820,7 @@ class ClaudeAuthError extends Error {
   }
 }
 function claudeConfigDir(env = process.env) {
-  return env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  return env.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude");
 }
 async function detectClaudeProxy(cwd, env = process.env, configDir = claudeConfigDir(env)) {
   const found = {
@@ -44675,9 +44830,9 @@ async function detectClaudeProxy(cwd, env = process.env, configDir = claudeConfi
     tokenSource: env.ANTHROPIC_AUTH_TOKEN ? "environment" : null
   };
   for (const file of [
-    join(configDir, "settings.json"),
-    join(cwd, ".claude", "settings.json"),
-    join(cwd, ".claude", "settings.local.json")
+    join2(configDir, "settings.json"),
+    join2(cwd, ".claude", "settings.json"),
+    join2(cwd, ".claude", "settings.local.json")
   ]) {
     try {
       const block = JSON.parse(await readFile(file, "utf8"))?.env;
@@ -44757,12 +44912,13 @@ function parseLoginStatus(stdout) {
   }
 }
 async function loginStatus(runner = run) {
-  if (!claudeAvailable())
+  const claude = claudeExecutable();
+  if (!claude)
     return { loggedIn: false, method: "missing", email: null };
   const env = claudeProcessEnv();
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
-  const result = await runner(CLAUDE_BIN, ["auth", "status", "--json"], { env });
+  const result = await runner(claude, ["auth", "status", "--json"], { env });
   if (result.exitCode !== 0 && !result.stdout.trim())
     return { loggedIn: false, method: "unknown", email: null };
   return parseLoginStatus(result.stdout);
@@ -44773,7 +44929,16 @@ var LOGIN_POLL_MS = 2000;
 var URL_WAIT_MS = 1500;
 var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function publicState(f) {
-  return { inProgress: f.inProgress, email: f.email, url: f.url, done: f.done, error: f.error };
+  const download2 = f.downloading && f.inProgress ? binaryDownload() ?? { receivedBytes: 0, totalBytes: null } : null;
+  return {
+    inProgress: f.inProgress,
+    email: f.email,
+    url: f.url,
+    download: download2,
+    acceptsCode: f.acceptsCode && f.inProgress,
+    done: f.done,
+    error: f.error
+  };
 }
 function loginState() {
   return flow ? publicState(flow) : null;
@@ -44803,13 +44968,16 @@ async function startLogin(email, deps = {}) {
     throw new ClaudeAuthError("Enter the email of your Claude account", 400);
   if (flow?.inProgress)
     throw new ClaudeAuthError("A sign-in is already in progress", 409);
-  if (!claudeAvailable())
-    throw new ClaudeAuthError("The Claude CLI is not on PATH", 502);
-  const status = deps.status ?? (() => loginStatus());
+  const claude = (deps.executable ?? claudeExecutable)();
+  if (!claude && !(deps.canFetchBinary ?? canFetchBinary)()) {
+    throw new ClaudeAuthError("Claude Code is not published for this platform — install the claude command, then sign in", 502);
+  }
   const f = {
     inProgress: true,
     email: address,
     url: null,
+    downloading: !claude,
+    acceptsCode: false,
     done: false,
     error: null,
     child: null,
@@ -44819,9 +44987,22 @@ async function startLogin(email, deps = {}) {
     urlWaiters: []
   };
   flow = f;
+  if (claude)
+    return launchLogin(f, claude, deps);
+  (deps.fetchBinary ?? fetchBinary)().then((fetched) => {
+    if (!f.inProgress)
+      return;
+    f.downloading = false;
+    launchLogin(f, fetched, deps);
+  }, (e) => finish(f, e.message));
+  return publicState(f);
+}
+async function launchLogin(f, claude, deps) {
+  const address = f.email;
+  const status = deps.status ?? (() => loginStatus());
   let child;
   try {
-    child = (deps.spawn ?? nodeSpawn)(CLAUDE_BIN, ["auth", "login", "--email", address], {
+    child = (deps.spawn ?? nodeSpawn)(claude, ["auth", "login", "--email", address], {
       env: claudeProcessEnv(),
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -44834,6 +45015,8 @@ async function startLogin(email, deps = {}) {
     const text = String(data);
     f.output = [...f.output, ...text.split(`
 `).filter((l) => l.trim())].slice(-20);
+    if (/paste (the )?code/i.test(text))
+      f.acceptsCode = true;
     if (!f.url) {
       const match = /https:\/\/[^\s'"<>)\]]+/.exec(text);
       if (match) {
@@ -44879,6 +45062,19 @@ async function startLogin(email, deps = {}) {
   });
   return publicState(f);
 }
+var CODE = /^\S{1,4096}$/;
+function submitLoginCode(code) {
+  const value = code.trim();
+  if (!CODE.test(value))
+    throw new ClaudeAuthError("Paste the code the sign-in page shows", 400);
+  const f = flow;
+  const input = f?.inProgress ? f.child?.stdin : null;
+  if (!f || !f.acceptsCode || !input || input.destroyed)
+    throw new ClaudeAuthError("No sign-in is waiting for a code", 409);
+  input.write(`${value}
+`);
+  return publicState(f);
+}
 function cancelLogin() {
   if (flow?.inProgress)
     finish(flow, "Sign-in cancelled");
@@ -44886,9 +45082,10 @@ function cancelLogin() {
 }
 async function logout(runner = run) {
   cancelLogin();
-  if (!claudeAvailable())
-    throw new ClaudeAuthError("The Claude CLI is not on PATH", 502);
-  const result = await runner(CLAUDE_BIN, ["auth", "logout"], { env: claudeProcessEnv() });
+  const claude = claudeExecutable();
+  if (!claude)
+    throw new ClaudeAuthError("Claude Code is not set up on this machine", 502);
+  const result = await runner(claude, ["auth", "logout"], { env: claudeProcessEnv() });
   if (result.exitCode !== 0) {
     throw new ClaudeAuthError(`Could not sign out: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`, 502);
   }
@@ -45150,7 +45347,7 @@ function flattenResult(content) {
   }).join(`
 `);
 }
-var CLAUDE_MISSING = "Claude CLI not found — install the `claude` command";
+var CLAUDE_MISSING = "Claude Code is not set up — sign in with your Claude account's email in Settings → Claude";
 
 class ClaudeSession {
   host;
@@ -45347,8 +45544,7 @@ function createClaudeProvider(options = {}) {
     },
     defaultPermissionMode: "auto",
     loginHint: {
-      text: "The Claude CLI is not signed in on this machine: run the command in a terminal, then start a new session.",
-      command: "claude auth login"
+      text: "Claude is not signed in on this machine: sign in with your email in Settings → Claude, then start a new session."
     },
     async start(opts) {
       const session = new ClaudeSession(opts.host);
@@ -45358,7 +45554,7 @@ function createClaudeProvider(options = {}) {
       session.firstResponseMs = Math.max(0, Math.floor(await firstResponseSeconds() * 1000));
       const sdkOptions = {
         cwd: opts.cwd,
-        pathToClaudeCodeExecutable: which(CLAUDE_BIN) ?? undefined,
+        pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
         includePartialMessages: true,
         permissionMode: opts.permissionMode,
         allowDangerouslySkipPermissions: true,
@@ -45398,7 +45594,7 @@ function createClaudeProvider(options = {}) {
           prompt,
           options: {
             cwd: req.cwd,
-            pathToClaudeCodeExecutable: which(CLAUDE_BIN) ?? undefined,
+            pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
             maxTurns: 1,
             tools: [],
             permissionMode: "default",
@@ -45441,7 +45637,7 @@ var guarded = (handler) => (req, params) => {
   return handler(req, params);
 };
 function tilde(path) {
-  const home = homedir2();
+  const home = homedir3();
   return path && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 function claudeAuthView(auth, login, firstResponseSeconds) {
@@ -45449,6 +45645,7 @@ function claudeAuthView(auth, login, firstResponseSeconds) {
     mode: auth.mode,
     inferred: auth.inferred,
     cliAvailable: claudeAvailable(),
+    canFetchClaude: canFetchBinary(),
     login,
     proxy: {
       url: auth.storedUrl ?? auth.detected.url,
@@ -45539,6 +45736,14 @@ var plugin = {
         return claudeFailure(e);
       }
     };
+    const postLoginCode = async (req) => {
+      const body = await req.json().catch(() => ({}));
+      try {
+        return json({ signIn: submitLoginCode(typeof body.code === "string" ? body.code : "") });
+      } catch (e) {
+        return claudeFailure(e);
+      }
+    };
     const getLogin = async () => json({ signIn: loginState(), login: await loginStatus() });
     const deleteLogin = () => json({ signIn: cancelLogin() });
     const postLogout = async () => {
@@ -45565,6 +45770,7 @@ var plugin = {
     add("POST", "/api/claude/proxy/check", postProxyCheck);
     add("POST", "/api/claude/login", postLogin);
     add("GET", "/api/claude/login", getLogin);
+    add("POST", "/api/claude/login/code", postLoginCode);
     add("DELETE", "/api/claude/login", deleteLogin);
     add("POST", "/api/claude/logout", postLogout);
     add("GET", "/api/claude/settings", getSettings);
@@ -45578,5 +45784,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=281F2F7975423C1464756E2164756E21
+//# debugId=DDB3F355FC4AFE5264756E2164756E21
 //# sourceMappingURL=host.js.map

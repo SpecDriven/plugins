@@ -20,7 +20,7 @@ import type {
   SDKUserMessage,
   SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
-import { AgentError, normalizePermissionMode, which } from "@specdriven/host";
+import { AgentError, normalizePermissionMode } from "@specdriven/host";
 import type {
   AgentHost,
   AgentOutput,
@@ -35,7 +35,7 @@ import type {
   SlashCommandInfo,
 } from "@specdriven/host";
 import { claudeLaunch, detectClaudeProxy } from "./auth";
-import { CLAUDE_BIN, claudeAvailable } from "./cli";
+import { CLAUDE_BIN, claudeAvailable, claudeExecutable } from "./cli";
 import { DEFAULT_SETTINGS, type ClaudeSettingsValues } from "./settings";
 
 // --- The account chip -------------------------------------------------------
@@ -374,8 +374,8 @@ function flattenResult(content: unknown): string {
 
 // --- The session ------------------------------------------------------------
 
-/** The refusal when no `claude` is on PATH. */
-export const CLAUDE_MISSING = "Claude CLI not found — install the `claude` command";
+/** The refusal when there is no Claude Code: no `claude` on PATH, nothing fetched. */
+export const CLAUDE_MISSING = "Claude Code is not set up — sign in with your Claude account's email in Settings → Claude";
 
 class ClaudeSession implements AgentSession {
   readonly input = new InputQueue<SDKUserMessage>();
@@ -604,7 +604,7 @@ class ClaudeSession implements AgentSession {
 // --- The provider -----------------------------------------------------------
 
 export interface ClaudeProviderOptions {
-  /** Default: the Claude CLI on PATH (src/cli.ts claudeAvailable). */
+  /** Default: a Claude Code to run (src/cli.ts claudeAvailable). */
   available?: () => boolean;
   /** Default: the injected factory, else the SDK. */
   query?: QueryFactory;
@@ -639,8 +639,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
     },
     defaultPermissionMode: "auto",
     loginHint: {
-      text: "The Claude CLI is not signed in on this machine: run the command in a terminal, then start a new session.",
-      command: "claude auth login",
+      text: "Claude is not signed in on this machine: sign in with your email in Settings → Claude, then start a new session.",
     },
     async start(opts: AgentStartOptions): Promise<AgentSession> {
       const session = new ClaudeSession(opts.host);
@@ -653,7 +652,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
       session.firstResponseMs = Math.max(0, Math.floor((await firstResponseSeconds()) * 1000));
       const sdkOptions: Options = {
         cwd: opts.cwd,
-        pathToClaudeCodeExecutable: which(CLAUDE_BIN) ?? undefined,
+        pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
         includePartialMessages: true,
         permissionMode: opts.permissionMode,
         // Lets the pane's mode select switch to bypass later; nothing
@@ -698,7 +697,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
           prompt,
           options: {
             cwd: req.cwd,
-            pathToClaudeCodeExecutable: which(CLAUDE_BIN) ?? undefined,
+            pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
             maxTurns: 1,
             // No built-in tools at all: nothing to read, nothing to run,
             // nothing to ask permission for.

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEFAULT_AGENT_FIRST_RESPONSE_SECONDS, type ClaudeAuthMode } from "../settings";
 
 // Settings → Claude (specs/agents/claude.feature.md "Choose how Claude signs
 // in", "API proxy settings are filled in from Claude Code's settings", "Sign
-// in to Claude with an email"): how every Claude the app starts signs in —
-// the Claude account the CLI is signed in to, or an API proxy with a token
+// in to Claude with an email", "Sign in to Claude without Claude Code
+// installed"): how every Claude the app starts signs in — the Claude account
+// Claude Code is signed in to, or an API proxy with a token
 // kept on this device. The host half (src/auth.ts, src/host.ts) never sends
 // a token back; the page learns only whether there is one. What
 // the section changes goes through the plugin's own route
@@ -14,6 +15,10 @@ export interface ClaudeSignIn {
   inProgress: boolean;
   email: string;
   url: string | null;
+  /** Claude Code being fetched before the sign-in starts. */
+  download: { receivedBytes: number; totalBytes: number | null } | null;
+  /** The CLI takes the code a sign-in page opened from the link shows. */
+  acceptsCode: boolean;
   done: boolean;
   error: string | null;
 }
@@ -23,6 +28,8 @@ export interface ClaudeAuthInfo {
   /** No stored choice: the server inferred this one. */
   inferred: boolean;
   cliAvailable: boolean;
+  /** No Claude Code yet, but the email sign-in fetches one. */
+  canFetchClaude: boolean;
   login: { loggedIn: boolean; method: string; email: string | null };
   proxy: {
     url: string | null;
@@ -73,7 +80,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<{ 
 
 const MODE_HINT: Record<ClaudeAuthMode, string> = {
   login:
-    "Sessions use the Claude account the Claude CLI is signed in to. A proxy or API key in Claude Code's own settings is set aside for them.",
+    "Sessions use the Claude account Claude Code is signed in to. A proxy or API key in Claude Code's own settings is set aside for them.",
   proxy:
     "Sessions send their API calls to the proxy below, with its token. That overrides whatever Claude Code's own settings say.",
 };
@@ -189,10 +196,13 @@ function ClaudeAccount({
   refresh: () => Promise<void>;
 }) {
   const [email, setEmail] = useState(info.login.email ?? "");
+  const [code, setCode] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const signIn = info.signIn;
   const inProgress = signIn?.inProgress ?? false;
+  /** The sign-in page already opened, so a poll that brings it opens it once. */
+  const opened = useRef<string | null>(null);
 
   // While the browser sign-in is under way, ask the server every couple of
   // seconds whether it came back.
@@ -202,15 +212,22 @@ function ClaudeAccount({
     const tick = async () => {
       const result = await call<{ signIn: ClaudeSignIn | null; login: ClaudeAuthInfo["login"] }>("GET", "/api/claude/login");
       if (!live || !result.ok) return;
-      if (result.data.signIn?.inProgress) onChange({ ...info, signIn: result.data.signIn, login: result.data.login });
-      else await refresh();
+      const next = result.data.signIn;
+      if (next?.inProgress) {
+        onChange({ ...info, signIn: next, login: result.data.login });
+        // After a download the CLI's page arrives by poll, not by the start.
+        if (next.url && opened.current !== next.url) {
+          opened.current = next.url;
+          window.open(next.url, "_blank", "noopener");
+        }
+      } else await refresh();
     };
-    const timer = setInterval(() => void tick(), 2000);
+    const timer = setInterval(() => void tick(), signIn?.download ? 500 : 2000);
     return () => {
       live = false;
       clearInterval(timer);
     };
-  }, [inProgress]);
+  }, [inProgress, Boolean(signIn?.download)]);
 
   const start = async () => {
     setBusy(true);
@@ -219,7 +236,17 @@ function ClaudeAccount({
     setBusy(false);
     if (!result.ok) return setStatus(result.error);
     onChange({ ...info, signIn: result.data.signIn });
+    if (result.data.signIn.url) opened.current = result.data.signIn.url;
     if (result.data.signIn.url) window.open(result.data.signIn.url, "_blank", "noopener");
+  };
+  const sendCode = async () => {
+    setBusy(true);
+    setStatus(null);
+    const result = await call<{ signIn: ClaudeSignIn }>("POST", "/api/claude/login/code", { code: code.trim() });
+    setBusy(false);
+    if (!result.ok) return setStatus(result.error);
+    setCode("");
+    onChange({ ...info, signIn: result.data.signIn });
   };
   const cancel = async () => {
     await call("DELETE", "/api/claude/login");
@@ -245,8 +272,13 @@ function ClaudeAccount({
   return (
     <div className="settings-row auth-section">
       <span className="auth-title">Claude account</span>
-      {!info.cliAvailable ? (
-        <p className="hint">The Claude CLI is not on PATH — install Claude Code first, then come back here.</p>
+      {!info.cliAvailable && !info.canFetchClaude ? (
+        <p className="hint">Claude Code is not published for this platform — install the claude command, then come back here.</p>
+      ) : !info.cliAvailable ? (
+        <p className="hint">
+          Enter the email of your Claude account to sign in through the browser. Claude Code is not installed, so the app
+          downloads it first (about 90 MB, once).
+        </p>
       ) : (
         <p className="hint">
           {who}
@@ -259,7 +291,18 @@ function ClaudeAccount({
           {info.login.loggedIn && info.login.method !== "api_key" ? "." : info.login.loggedIn ? "" : " — enter the email of your Claude account to sign in through the browser."}
         </p>
       )}
-      {inProgress ? (
+      {inProgress && signIn?.download ? (
+        <>
+          <p className="hint" role="status">
+            Downloading Claude Code — {downloadText(signIn.download)}…
+          </p>
+          <div className="auth-row">
+            <button className="secondary" onClick={() => void cancel()}>
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : inProgress ? (
         <>
           <p className="hint">
             Finish signing in in your browser
@@ -275,6 +318,27 @@ function ClaudeAccount({
             ) : null}
             .
           </p>
+          {signIn?.acceptsCode && (
+            <>
+              <p className="hint">Signed in through that link? The page then shows a code — paste it here to finish.</p>
+              <div className="auth-row">
+                <input
+                  aria-label="Code from the sign-in page"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && code.trim()) void sendCode();
+                  }}
+                  placeholder="Code from the sign-in page"
+                  autoComplete="one-time-code"
+                  spellCheck={false}
+                />
+                <button className="secondary" disabled={busy || !code.trim()} onClick={() => void sendCode()}>
+                  Finish sign-in
+                </button>
+              </div>
+            </>
+          )}
           <div className="auth-row">
             <button className="secondary" onClick={() => void cancel()}>
               Cancel
@@ -282,7 +346,7 @@ function ClaudeAccount({
           </div>
         </>
       ) : (
-        info.cliAvailable && (
+        (info.cliAvailable || info.canFetchClaude) && (
           <div className="auth-row">
             <input
               aria-label="Claude account email"
@@ -310,6 +374,14 @@ function ClaudeAccount({
       {status && <p className="error">{status}</p>}
     </div>
   );
+}
+
+const MB = 1024 * 1024;
+
+/** "12 of 70 MB", or "12 MB" when the registry gave no size. */
+export function downloadText(d: { receivedBytes: number; totalBytes: number | null }): string {
+  const mb = (n: number) => Math.round(n / MB);
+  return d.totalBytes ? `${mb(d.receivedBytes)} of ${mb(d.totalBytes)} MB` : `${mb(d.receivedBytes)} MB`;
 }
 
 /** The API proxy: its url and token, what Claude Code's settings carry, a check. */

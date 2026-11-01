@@ -8,11 +8,21 @@ proxy with a token kept in the plugin's secret store on this device. It was
 built into SpecDriven through 0.1.184; this plugin takes it over, installed
 by the app itself where it finds `claude` on PATH.
 
+It needs no `claude` command. Without one, the first email sign-in in
+Settings → Claude downloads the Claude Code binary the Agent SDK publishes
+for this platform from the npm registry, keeps it only if it matches the
+integrity pinned in `src/binaries.json`, and stores it under
+`~/.specdriven/claude-code/<sdk version>/<platform>/`. A `claude` on PATH
+still comes first. After bumping `@anthropic-ai/claude-agent-sdk`, run
+`bun scripts/pin-binaries.ts` to pin the new version's binaries (a test
+fails until the pins match the dependency).
+
 What it keeps: its settings under `pluginSettings["agent-claude"]` in the
 app's settings.json (the sign-in mode, the proxy url, the pane's
 first-response wait), adopting the top-level keys they had while built in;
 the proxy token in the app's secret store (`~/.specdriven/secrets/`, or the
-OS keychain in the desktop app).
+OS keychain in the desktop app); the downloaded Claude Code, when there was
+no `claude`.
 
 What it adds to the app: the `claude` provider on the agent registry; the
 `/api/claude/*` routes behind Settings → Claude; the Claude section of the
@@ -26,7 +36,9 @@ src/client.tsx         the browser half: the Settings section
 src/provider.ts        the AgentProvider over the Claude Agent SDK
 src/auth.ts            how Claude signs in: proxy detection, the login, the --settings override
 src/settings.ts        the plugin's settings values and the PUT body's validation
-src/cli.ts             the claude command and a test seam for its availability
+src/cli.ts             the Claude Code to run, and a test seam for its availability
+src/binary.ts          Claude Code fetched from npm when there is no claude command
+src/binaries.json      the pinned integrity of each platform's package (scripts/pin-binaries.ts)
 src/ui/                the Settings section's React
 test/                  bun test, against an app checkout
 ```
@@ -34,8 +46,9 @@ test/                  bun test, against an app checkout
 `@specdriven/host` and `@specdriven/client` are the app's own modules
 (`src/plugins/sdk/` in the app); the build points them, and React, at shims
 over what the running app publishes. `bun install` leaves the SDK's optional
-per-platform packages out (bunfig.toml): the plugin runs the developer's own
-`claude`, and the host bundle carries nothing native.
+per-platform packages out (bunfig.toml): the host bundle carries nothing
+native, and a machine without `claude` fetches its binary at sign-in
+instead (src/binary.ts).
 
 ## Tests
 
