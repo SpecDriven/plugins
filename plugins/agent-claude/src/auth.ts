@@ -1,8 +1,10 @@
 // How the app's Claude signs in (specs/agents/claude.feature.md "Choose how
 // Claude signs in", "API proxy settings are filled in from Claude Code's
-// settings", "Sign in to Claude with an email"). Two ways: the claude.ai
-// account the Claude CLI is signed in to, or an API proxy — a base url and a
-// bearer token, prefilled from what Claude Code's own settings files and the
+// settings", "Sign in to Claude with an email", "Sign in to Claude without
+// Claude Code installed"). Two ways: the claude.ai account Claude Code is
+// signed in to (the `claude` on PATH, or the binary the first email sign-in
+// fetches when there is none, src/binary.ts), or an API proxy — a base url
+// and a bearer token, prefilled from what Claude Code's own settings files and the
 // environment already say, kept in the plugin's own stores (its section of
 // settings.json for the url, its secret store for the token) and never
 // written back into Claude Code's files.
@@ -22,7 +24,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { run } from "@specdriven/host";
 import type { RunResult } from "@specdriven/host";
-import { CLAUDE_BIN, claudeAvailable } from "./cli";
+import { binaryDownload, canFetchBinary, fetchBinary, type BinaryDownload } from "./binary";
+import { claudeExecutable } from "./cli";
 import { normalizeClaudeAuth, normalizeClaudeProxyUrl, type ClaudeAuthMode, type ClaudeSettingsValues } from "./settings";
 
 type Env = Record<string, string | undefined>;
@@ -218,7 +221,8 @@ export function parseLoginStatus(stdout: string): LoginStatus {
 }
 
 export async function loginStatus(runner: Runner = run): Promise<LoginStatus> {
-  if (!claudeAvailable()) return { loggedIn: false, method: "missing", email: null };
+  const claude = claudeExecutable();
+  if (!claude) return { loggedIn: false, method: "missing", email: null };
   // The account alone: a key in the environment would read as a login,
   // and the account sign-in sets it aside anyway (launchFor). The CLI's
   // `auth status` takes no --settings, so a key in a settings file still
@@ -226,7 +230,7 @@ export async function loginStatus(runner: Runner = run): Promise<LoginStatus> {
   const env = claudeProcessEnv();
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
-  const result = await runner(CLAUDE_BIN, ["auth", "status", "--json"], { env });
+  const result = await runner(claude, ["auth", "status", "--json"], { env });
   if (result.exitCode !== 0 && !result.stdout.trim()) return { loggedIn: false, method: "unknown", email: null };
   return parseLoginStatus(result.stdout);
 }
@@ -237,11 +241,18 @@ export interface LoginState {
   email: string;
   /** The page the CLI printed for the browser, once it has. */
   url: string | null;
+  /** Claude Code being fetched first, when there was none; null otherwise. */
+  download: BinaryDownload | null;
+  /** The CLI asks for the code its sign-in page shows when that page was
+      opened from the printed link rather than by the CLI. */
+  acceptsCode: boolean;
   done: boolean;
   error: string | null;
 }
 
-interface LoginFlow extends LoginState {
+interface LoginFlow extends Omit<LoginState, "download"> {
+  /** Fetching Claude Code before the sign-in can start. */
+  downloading: boolean;
   child: ChildProcess | null;
   output: string[];
   timer: ReturnType<typeof setTimeout> | null;
@@ -260,6 +271,11 @@ export interface LoginDeps {
   timeoutMs?: number;
   /** How long to wait for the CLI to print its url before answering (ms). */
   urlWaitMs?: number;
+  /** The Claude Code to run; default: src/cli.ts claudeExecutable. */
+  executable?: () => string | null;
+  /** Fetch Claude Code when there is none; default: src/binary.ts. */
+  fetchBinary?: () => Promise<string>;
+  canFetchBinary?: () => boolean;
 }
 
 export const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -268,7 +284,16 @@ const URL_WAIT_MS = 1500;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function publicState(f: LoginFlow): LoginState {
-  return { inProgress: f.inProgress, email: f.email, url: f.url, done: f.done, error: f.error };
+  const download = f.downloading && f.inProgress ? (binaryDownload() ?? { receivedBytes: 0, totalBytes: null }) : null;
+  return {
+    inProgress: f.inProgress,
+    email: f.email,
+    url: f.url,
+    download,
+    acceptsCode: f.acceptsCode && f.inProgress,
+    done: f.done,
+    error: f.error,
+  };
 }
 
 /** The sign-in under way or last finished, or null when none was started. */
@@ -294,18 +319,24 @@ function finish(f: LoginFlow, error: string | null): void {
 /**
  * Start `claude auth login --email <email>`: the CLI opens the browser and
  * prints the sign-in page's url (kept for the page, for when it could not);
- * the sign-in is done once `claude auth status` says so. One at a time.
+ * the sign-in is done once `claude auth status` says so. With no Claude Code
+ * on this machine, this platform's is fetched first and the answer comes at
+ * once, with the download under way. One at a time.
  */
 export async function startLogin(email: string, deps: LoginDeps = {}): Promise<LoginState> {
   const address = email.trim();
   if (!EMAIL.test(address)) throw new ClaudeAuthError("Enter the email of your Claude account", 400);
   if (flow?.inProgress) throw new ClaudeAuthError("A sign-in is already in progress", 409);
-  if (!claudeAvailable()) throw new ClaudeAuthError("The Claude CLI is not on PATH", 502);
-  const status = deps.status ?? (() => loginStatus());
+  const claude = (deps.executable ?? claudeExecutable)();
+  if (!claude && !(deps.canFetchBinary ?? canFetchBinary)()) {
+    throw new ClaudeAuthError("Claude Code is not published for this platform — install the claude command, then sign in", 502);
+  }
   const f: LoginFlow = {
     inProgress: true,
     email: address,
     url: null,
+    downloading: !claude,
+    acceptsCode: false,
     done: false,
     error: null,
     child: null,
@@ -315,9 +346,25 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
     urlWaiters: [],
   };
   flow = f;
+  if (claude) return launchLogin(f, claude, deps);
+  (deps.fetchBinary ?? fetchBinary)().then(
+    (fetched) => {
+      if (!f.inProgress) return;
+      f.downloading = false;
+      void launchLogin(f, fetched, deps);
+    },
+    (e: Error) => finish(f, e.message),
+  );
+  return publicState(f);
+}
+
+/** Run `auth login` for a flow, and watch for the login it brings. */
+async function launchLogin(f: LoginFlow, claude: string, deps: LoginDeps): Promise<LoginState> {
+  const address = f.email;
+  const status = deps.status ?? (() => loginStatus());
   let child: ChildProcess;
   try {
-    child = (deps.spawn ?? nodeSpawn)(CLAUDE_BIN, ["auth", "login", "--email", address], {
+    child = (deps.spawn ?? nodeSpawn)(claude, ["auth", "login", "--email", address], {
       env: claudeProcessEnv() as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -329,6 +376,7 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
   const onData = (data: Buffer | string) => {
     const text = String(data);
     f.output = [...f.output, ...text.split("\n").filter((l) => l.trim())].slice(-20);
+    if (/paste (the )?code/i.test(text)) f.acceptsCode = true;
     if (!f.url) {
       const match = /https:\/\/[^\s'"<>)\]]+/.exec(text);
       if (match) {
@@ -370,6 +418,23 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
   return publicState(f);
 }
 
+const CODE = /^\S{1,4096}$/;
+
+/**
+ * The code the sign-in page shows when it was opened from the printed link:
+ * the CLI reads it from its input and finishes the login with it (the poll
+ * notices), or exits saying the code was refused.
+ */
+export function submitLoginCode(code: string): LoginState {
+  const value = code.trim();
+  if (!CODE.test(value)) throw new ClaudeAuthError("Paste the code the sign-in page shows", 400);
+  const f = flow;
+  const input = f?.inProgress ? f.child?.stdin : null;
+  if (!f || !f.acceptsCode || !input || input.destroyed) throw new ClaudeAuthError("No sign-in is waiting for a code", 409);
+  input.write(`${value}\n`);
+  return publicState(f);
+}
+
 /** Stop a sign-in under way; nothing when none is. */
 export function cancelLogin(): LoginState | null {
   if (flow?.inProgress) finish(flow, "Sign-in cancelled");
@@ -385,8 +450,9 @@ export function resetLogin(): void {
 /** `claude auth logout` — also drops any sign-in under way. */
 export async function logout(runner: Runner = run): Promise<void> {
   cancelLogin();
-  if (!claudeAvailable()) throw new ClaudeAuthError("The Claude CLI is not on PATH", 502);
-  const result = await runner(CLAUDE_BIN, ["auth", "logout"], { env: claudeProcessEnv() });
+  const claude = claudeExecutable();
+  if (!claude) throw new ClaudeAuthError("Claude Code is not set up on this machine", 502);
+  const result = await runner(claude, ["auth", "logout"], { env: claudeProcessEnv() });
   if (result.exitCode !== 0) {
     throw new ClaudeAuthError(`Could not sign out: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`, 502);
   }

@@ -108,7 +108,7 @@ async function call(method, path, body) {
   }
 }
 var MODE_HINT = {
-  login: "Sessions use the Claude account the Claude CLI is signed in to. A proxy or API key in Claude Code's own settings is set aside for them.",
+  login: "Sessions use the Claude account Claude Code is signed in to. A proxy or API key in Claude Code's own settings is set aside for them.",
   proxy: "Sessions send their API calls to the proxy below, with its token. That overrides whatever Claude Code's own settings say."
 };
 function ClaudeSettings() {
@@ -250,10 +250,12 @@ function ClaudeAccount({
   refresh
 }) {
   const [email, setEmail] = useState(info.login.email ?? "");
+  const [code, setCode] = useState("");
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const signIn = info.signIn;
   const inProgress = signIn?.inProgress ?? false;
+  const opened = useRef(null);
   useEffect(() => {
     if (!inProgress)
       return;
@@ -262,17 +264,22 @@ function ClaudeAccount({
       const result = await call("GET", "/api/claude/login");
       if (!live || !result.ok)
         return;
-      if (result.data.signIn?.inProgress)
-        onChange({ ...info, signIn: result.data.signIn, login: result.data.login });
-      else
+      const next = result.data.signIn;
+      if (next?.inProgress) {
+        onChange({ ...info, signIn: next, login: result.data.login });
+        if (next.url && opened.current !== next.url) {
+          opened.current = next.url;
+          window.open(next.url, "_blank", "noopener");
+        }
+      } else
         await refresh();
     };
-    const timer = setInterval(() => void tick(), 2000);
+    const timer = setInterval(() => void tick(), signIn?.download ? 500 : 2000);
     return () => {
       live = false;
       clearInterval(timer);
     };
-  }, [inProgress]);
+  }, [inProgress, Boolean(signIn?.download)]);
   const start = async () => {
     setBusy(true);
     setStatus(null);
@@ -282,7 +289,19 @@ function ClaudeAccount({
       return setStatus(result.error);
     onChange({ ...info, signIn: result.data.signIn });
     if (result.data.signIn.url)
+      opened.current = result.data.signIn.url;
+    if (result.data.signIn.url)
       window.open(result.data.signIn.url, "_blank", "noopener");
+  };
+  const sendCode = async () => {
+    setBusy(true);
+    setStatus(null);
+    const result = await call("POST", "/api/claude/login/code", { code: code.trim() });
+    setBusy(false);
+    if (!result.ok)
+      return setStatus(result.error);
+    setCode("");
+    onChange({ ...info, signIn: result.data.signIn });
   };
   const cancel = async () => {
     await call("DELETE", "/api/claude/login");
@@ -305,9 +324,12 @@ function ClaudeAccount({
         className: "auth-title",
         children: "Claude account"
       }),
-      !info.cliAvailable ? /* @__PURE__ */ jsx("p", {
+      !info.cliAvailable && !info.canFetchClaude ? /* @__PURE__ */ jsx("p", {
         className: "hint",
-        children: "The Claude CLI is not on PATH — install Claude Code first, then come back here."
+        children: "Claude Code is not published for this platform — install the claude command, then come back here."
+      }) : !info.cliAvailable ? /* @__PURE__ */ jsx("p", {
+        className: "hint",
+        children: "Enter the email of your Claude account to sign in through the browser. Claude Code is not installed, so the app downloads it first (about 90 MB, once)."
       }) : /* @__PURE__ */ jsxs("p", {
         className: "hint",
         children: [
@@ -324,7 +346,27 @@ function ClaudeAccount({
           info.login.loggedIn && info.login.method !== "api_key" ? "." : info.login.loggedIn ? "" : " — enter the email of your Claude account to sign in through the browser."
         ]
       }),
-      inProgress ? /* @__PURE__ */ jsxs(Fragment2, {
+      inProgress && signIn?.download ? /* @__PURE__ */ jsxs(Fragment2, {
+        children: [
+          /* @__PURE__ */ jsxs("p", {
+            className: "hint",
+            role: "status",
+            children: [
+              "Downloading Claude Code — ",
+              downloadText(signIn.download),
+              "…"
+            ]
+          }),
+          /* @__PURE__ */ jsx("div", {
+            className: "auth-row",
+            children: /* @__PURE__ */ jsx("button", {
+              className: "secondary",
+              onClick: () => void cancel(),
+              children: "Cancel"
+            })
+          })
+        ]
+      }) : inProgress ? /* @__PURE__ */ jsxs(Fragment2, {
         children: [
           /* @__PURE__ */ jsxs("p", {
             className: "hint",
@@ -348,6 +390,37 @@ function ClaudeAccount({
               "."
             ]
           }),
+          signIn?.acceptsCode && /* @__PURE__ */ jsxs(Fragment2, {
+            children: [
+              /* @__PURE__ */ jsx("p", {
+                className: "hint",
+                children: "Signed in through that link? The page then shows a code — paste it here to finish."
+              }),
+              /* @__PURE__ */ jsxs("div", {
+                className: "auth-row",
+                children: [
+                  /* @__PURE__ */ jsx("input", {
+                    "aria-label": "Code from the sign-in page",
+                    value: code,
+                    onChange: (e) => setCode(e.target.value),
+                    onKeyDown: (e) => {
+                      if (e.key === "Enter" && code.trim())
+                        sendCode();
+                    },
+                    placeholder: "Code from the sign-in page",
+                    autoComplete: "one-time-code",
+                    spellCheck: false
+                  }),
+                  /* @__PURE__ */ jsx("button", {
+                    className: "secondary",
+                    disabled: busy || !code.trim(),
+                    onClick: () => void sendCode(),
+                    children: "Finish sign-in"
+                  })
+                ]
+              })
+            ]
+          }),
           /* @__PURE__ */ jsx("div", {
             className: "auth-row",
             children: /* @__PURE__ */ jsx("button", {
@@ -357,7 +430,7 @@ function ClaudeAccount({
             })
           })
         ]
-      }) : info.cliAvailable && /* @__PURE__ */ jsxs("div", {
+      }) : (info.cliAvailable || info.canFetchClaude) && /* @__PURE__ */ jsxs("div", {
         className: "auth-row",
         children: [
           /* @__PURE__ */ jsx("input", {
@@ -396,6 +469,11 @@ function ClaudeAccount({
       })
     ]
   });
+}
+var MB = 1024 * 1024;
+function downloadText(d) {
+  const mb = (n) => Math.round(n / MB);
+  return d.totalBytes ? `${mb(d.receivedBytes)} of ${mb(d.totalBytes)} MB` : `${mb(d.receivedBytes)} MB`;
 }
 function ClaudeProxy({
   info,
@@ -603,5 +681,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=1E91E33AE27BC3C364756E2164756E21
+//# debugId=FFB712140D7A0F9464756E2164756E21
 //# sourceMappingURL=client.js.map

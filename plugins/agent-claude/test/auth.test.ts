@@ -3,7 +3,7 @@
 // settings", "Sign in to Claude with an email"): what Claude Code's own
 // settings say of a proxy, the mode inferred from that, the launch each
 // mode produces, the proxy check, the email sign-in driven through a fake
-// CLI, and the routes — which never hand the token to the page.
+// CLI — fetched first when there is none — and the routes — which never hand the token to the page.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -27,10 +27,13 @@ import {
   parseLoginStatus,
   resetLogin,
   startLogin,
+  submitLoginCode,
 } from "../src/auth";
+import { BINARY_PINS, binaryPath, binaryPlatform, fetchBinary, installedBinary } from "../src/binary";
 import { setClaudeAvailability } from "../src/cli";
 import { claudeSettingsOf, normalizeClaudeAuth, normalizeClaudeProxyUrl, type ClaudeSettingsValues } from "../src/settings";
 import { mountPlugin, quietProfile } from "./app";
+import { integrityOf, packageTarball, servingFetch } from "./registry";
 
 /** The proxy token's store, as HostConfig.secrets("token") names it for this plugin. */
 const tokenStore = () => secretStore("agent-claude.token");
@@ -313,10 +316,32 @@ esac
 exit 1
 `;
 
-async function fakeClaudeOnPath(): Promise<void> {
+// A stand-in whose browser never comes back: its login waits for the code
+// the sign-in page shows, the way Claude Code's does, and takes only one.
+const FAKE_CLAUDE_CODE = `#!/bin/sh
+case "$1 $2" in
+  "auth status")
+    if [ -f "$SPECDRIVEN_TEST_LOGIN_MARK" ]; then
+      echo '{"loggedIn":true,"authMethod":"claude.ai","email":"ada@example.com"}'
+    else
+      echo '{"loggedIn":false,"authMethod":"none"}'
+    fi
+    exit 0 ;;
+  "auth login")
+    echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&login_hint=$4"
+    printf "Paste code here if prompted > "
+    read code
+    if [ "$code" = "good-code#state" ]; then : > "$SPECDRIVEN_TEST_LOGIN_MARK"; exit 0; fi
+    echo "Login failed: Request failed with status code 400" >&2
+    exit 1 ;;
+esac
+exit 1
+`;
+
+async function fakeClaudeOnPath(body = FAKE_CLAUDE): Promise<void> {
   const bin = join(home, "bin");
   await mkdir(bin, { recursive: true });
-  linkExecutable(bin, "claude", FAKE_CLAUDE);
+  linkExecutable(bin, "claude", body);
   process.env.PATH = `${bin}:${realPath ?? ""}`;
   process.env.SPECDRIVEN_TEST_LOGIN_MARK = join(home, "logged-in");
   setClaudeAvailability(null);
@@ -340,17 +365,25 @@ test("startLogin drives claude auth login, hands the page the url, and is done o
   expect(await refused(startLogin("ada@example.com"))).toBe(409);
 
   await settle(() => !loginState()!.inProgress);
-  expect(loginState()).toEqual({ inProgress: false, email: "ada@example.com", url: started.url, done: true, error: null });
+  expect(loginState()).toEqual({
+    inProgress: false,
+    email: "ada@example.com",
+    url: started.url,
+    download: null,
+    acceptsCode: false,
+    done: true,
+    error: null,
+  });
   expect(await loginStatus()).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
 
   await logout();
   expect((await loginStatus()).loggedIn).toBe(false);
 });
 
-test("a sign-in can be cancelled, and a bad email or a missing CLI is refused", async () => {
+test("a sign-in can be cancelled, and a bad email or a platform with no Claude Code is refused", async () => {
   expect(await refused(startLogin("not an email"))).toBe(400);
   setClaudeAvailability(() => false);
-  expect(await refused(startLogin("ada@example.com"))).toBe(502);
+  expect(await refused(startLogin("ada@example.com", { canFetchBinary: () => false }))).toBe(502);
   expect(await refused(logout())).toBe(502);
 
   await fakeClaudeOnPath();
@@ -363,6 +396,77 @@ test("a sign-in can be cancelled, and a bad email or a missing CLI is refused", 
   await startLogin("ada@example.com", { pollMs: 1000, timeoutMs: 100, urlWaitMs: 10 });
   await settle(() => !loginState()!.inProgress);
   expect(loginState()!.error).toContain("timed out");
+});
+
+test("a sign-in page opened from the printed link finishes with the code it shows, pasted in", async () => {
+  await fakeClaudeOnPath(FAKE_CLAUDE_CODE);
+  const submit = (code: string) => refused(Promise.resolve().then(() => submitLoginCode(code)));
+  expect(await submit("good-code#state")).toBe(409); // no sign-in under way
+
+  const started = await startLogin("ada@example.com", { pollMs: 50 });
+  expect(started.url).toBe("https://claude.com/cai/oauth/authorize?code=true&login_hint=ada@example.com");
+  await settle(() => loginState()!.acceptsCode);
+  expect(loginState()!.acceptsCode).toBe(true);
+  expect(await submit("   ")).toBe(400);
+  expect(await submit("two words")).toBe(400);
+  // A code the CLI refuses ends the sign-in with its words.
+  expect(submitLoginCode("stale-code").inProgress).toBe(true);
+  await settle(() => !loginState()!.inProgress);
+  expect(loginState()).toMatchObject({ done: false, acceptsCode: false, error: expect.stringContaining("status code 400") });
+
+  // The right one signs in.
+  await startLogin("ada@example.com", { pollMs: 50 });
+  await settle(() => loginState()!.acceptsCode);
+  submitLoginCode("  good-code#state ");
+  await settle(() => !loginState()!.inProgress);
+  expect(loginState()).toMatchObject({ done: true, error: null });
+  expect(await loginStatus()).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
+});
+
+test("with no Claude Code anywhere, the email sign-in fetches this platform's first, then signs in with it", async () => {
+  const platform = binaryPlatform()!;
+  const tgz = await packageTarball("claude", FAKE_CLAUDE);
+  const saved = BINARY_PINS.packages[platform]!;
+  BINARY_PINS.packages[platform] = integrityOf(tgz);
+  process.env.PATH = home; // no `claude` to find
+  process.env.SPECDRIVEN_TEST_LOGIN_MARK = join(home, "logged-in");
+  setClaudeAvailability(null);
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  try {
+    expect(await loginStatus()).toEqual({ loggedIn: false, method: "missing", email: null });
+    const started = await startLogin("ada@example.com", {
+      pollMs: 50,
+      fetchBinary: async () => {
+        await held;
+        return fetchBinary({ fetch: servingFetch(tgz) });
+      },
+    });
+    // The answer comes at once, with the download under way and no url yet.
+    expect(started).toMatchObject({ inProgress: true, email: "ada@example.com", url: null, download: { receivedBytes: 0 } });
+    expect(await refused(startLogin("ada@example.com"))).toBe(409);
+    release();
+
+    await settle(() => loginState()!.url !== null || !loginState()!.inProgress);
+    expect(loginState()).toMatchObject({ url: "https://claude.ai/oauth/authorize?email=ada@example.com&code=abc", download: null });
+    await settle(() => !loginState()!.inProgress);
+    expect(loginState()).toMatchObject({ done: true, error: null });
+    // The fetched Claude Code is the one every later call runs.
+    expect(installedBinary()).toBe(binaryPath()!);
+    expect(await loginStatus()).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
+    await logout();
+    expect((await loginStatus()).loggedIn).toBe(false);
+  } finally {
+    release();
+    BINARY_PINS.packages[platform] = saved;
+  }
+});
+
+test("a sign-in whose download fails ends with why", async () => {
+  setClaudeAvailability(() => false);
+  await startLogin("ada@example.com", { fetchBinary: async () => Promise.reject(new Error("Could not download Claude Code: HTTP 503")) });
+  await settle(() => !loginState()!.inProgress);
+  expect(loginState()).toMatchObject({ done: false, download: null, error: "Could not download Claude Code: HTTP 503" });
 });
 
 // --- the routes ------------------------------------------------------------
@@ -488,6 +592,22 @@ test("the sign-in routes drive the CLI and poll it", async () => {
   expect(out.body.login).toMatchObject({ loggedIn: false });
   const cancelled = await call("DELETE", "/api/claude/login");
   expect(cancelled.status).toBe(200);
+});
+
+test("POST /api/claude/login/code hands the CLI the code from the sign-in page", async () => {
+  await fakeClaudeOnPath(FAKE_CLAUDE_CODE);
+  expect((await call("POST", "/api/claude/login/code", { code: "good-code#state" })).status).toBe(409);
+  await call("POST", "/api/claude/login", { email: "ada@example.com" });
+  await settle(() => loginState()!.acceptsCode);
+  expect((await call("GET", "/api/claude/login")).body.signIn).toMatchObject({ inProgress: true, acceptsCode: true });
+  expect((await call("POST", "/api/claude/login/code", {})).status).toBe(400);
+  const sent = await call("POST", "/api/claude/login/code", { code: "good-code#state" });
+  expect(sent.status).toBe(200);
+  await settle(() => !loginState()!.inProgress);
+  expect((await call("GET", "/api/claude/login")).body).toMatchObject({
+    signIn: { done: true },
+    login: { loggedIn: true, email: "ada@example.com" },
+  });
 });
 
 test("the demo and the hosted app have no Claude sign-in", async () => {

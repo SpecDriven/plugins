@@ -586,7 +586,7 @@ test("the pane is gated by the Settings switch and the CLI on PATH", async () =>
   setClaudeAvailability(() => false);
   const noCli = await api("/api/agent/chat", "POST", { name: "chat", agent: "claude" });
   expect(noCli.status).toBe(502);
-  expect((await noCli.json()).error).toContain("Claude CLI not found");
+  expect((await noCli.json()).error).toContain("Claude Code is not set up");
   expect(await claudeAvailable()).toBe(false);
   expect(fakes).toHaveLength(0);
 });
