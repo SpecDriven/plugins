@@ -10,6 +10,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "@specdriven/app/src/server/api";
+import { agents } from "@specdriven/app/src/plugins/host/agents";
 import { pluginSection } from "@specdriven/app/src/plugins/host/pluginSettings";
 import { secretPath, secretStore, setSecretBackend } from "@specdriven/app/src/server/secrets";
 import { readState, writeState } from "@specdriven/app/src/server/state";
@@ -593,6 +594,42 @@ test("the sign-in routes drive the CLI and poll it", async () => {
   const cancelled = await call("DELETE", "/api/claude/login");
   expect(cancelled.status).toBe(200);
 });
+
+// An app from before the registry's `changed` hears nothing; the plugin runs as before there.
+test.if(typeof (agents as { changed?: unknown }).changed === "function")(
+  "a sign-in, a sign-out and another mode, proxy or token each tell the app Claude's sign-in changed",
+  async () => {
+  // The app then has the pane re-read the agents and live sessions restart
+  // under the new sign-in; before, both waited for an app restart.
+  await fakeClaudeOnPath();
+  const changes: string[] = [];
+  const unsubscribe = agents.subscribe((c) => {
+    if (String(c.type) === "changed") changes.push(c.id);
+  });
+  try {
+    await call("POST", "/api/claude/login", { email: "ada@example.com" });
+    cancelLogin();
+    expect(changes).toEqual([]);
+    await call("POST", "/api/claude/login", { email: "ada@example.com" });
+    await settle(() => !loginState()!.inProgress);
+    expect(loginState()!.done).toBe(true);
+    expect(changes).toEqual(["claude"]);
+    await call("POST", "/api/claude/logout");
+    expect(changes).toHaveLength(2);
+
+    expect((await call("PUT", "/api/claude/settings", { claudeAuth: "proxy", claudeProxyUrl: "http://localhost:6655" })).status).toBe(200);
+    expect(changes).toHaveLength(3);
+    // The first-response wait is not a sign-in.
+    expect((await call("PUT", "/api/claude/settings", { firstResponseSeconds: 30 })).status).toBe(200);
+    expect(changes).toHaveLength(3);
+    await call("POST", "/api/claude/token", { token: "sk-proxy" });
+    await call("DELETE", "/api/claude/token");
+    expect(changes).toHaveLength(5);
+  } finally {
+    unsubscribe();
+  }
+  },
+);
 
 test("POST /api/claude/login/code hands the CLI the code from the sign-in page", async () => {
   await fakeClaudeOnPath(FAKE_CLAUDE_CODE);

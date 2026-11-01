@@ -128,7 +128,7 @@ export function describeAccount(info: AccountInfoLike, baseUrl?: string): ChatAc
     const source = apiKey ?? token ?? "claude.ai login without a plan";
     return { billing: "api", label: "API billing", detail: detailOf("Billed per token", source) };
   }
-  return { billing: "none", label: "Not logged in", detail: "Run claude auth login in a terminal, then start a new session." };
+  return { billing: "none", label: "Not logged in", detail: "Sign in with your Claude account's email in Settings → Claude." };
 }
 
 // --- The SDK seam -----------------------------------------------------------
@@ -377,10 +377,32 @@ function flattenResult(content: unknown): string {
 /** The refusal when there is no Claude Code: no `claude` on PATH, nothing fetched. */
 export const CLAUDE_MISSING = "Claude Code is not set up — sign in with your Claude account's email in Settings → Claude";
 
+/** What one Claude Code run of a session is handed. */
+interface LaunchArgs {
+  input: InputQueue<SDKUserMessage>;
+  abort: AbortController;
+  permissionMode: PermissionMode;
+  /** Claude Code's id for the conversation to carry on, from a run before. */
+  resume?: string;
+}
+
+/** Start one Claude Code run with the sign-in as it stands now. */
+type Launcher = (args: LaunchArgs) => Promise<{ query: QueryLike; apiBaseUrl?: string; firstResponseMs: number }>;
+
 class ClaudeSession implements AgentSession {
-  readonly input = new InputQueue<SDKUserMessage>();
-  readonly abort = new AbortController();
+  /** The prompt side and the abort of the Claude Code run under way; a
+      refresh swaps both for the next run's. */
+  input = new InputQueue<SDKUserMessage>();
+  abort = new AbortController();
   query: QueryLike | null = null;
+  /** Starts a run; set by start(). */
+  launch: Launcher | null = null;
+  /** Claude Code's id for the conversation (init), which a new run resumes. */
+  private claudeSessionId: string | null = null;
+  /** A sign-in change came while a turn ran or Claude was starting. */
+  private refreshWanted = false;
+  /** The new run being started; a message typed meanwhile waits for it. */
+  private restarting: Promise<void> | null = null;
   /** Claude Code sends `init` with every turn; only the first is news. */
   private initSeen = false;
   private commands: SlashCommandInfo[] = [];
@@ -433,6 +455,7 @@ class ClaudeSession implements AgentSession {
   };
 
   async send(text: string): Promise<void> {
+    if (this.restarting) await this.restarting;
     this.input.push(userMessage(text));
     this.armFirstResponse();
   }
@@ -451,6 +474,91 @@ class ClaudeSession implements AgentSession {
     this.disarmFirstResponse();
     this.input.close();
     this.abort.abort();
+  }
+
+  /**
+   * The sign-in changed (src/host.ts): the Claude Code under way keeps the
+   * credentials it started with, and its account is what the chip says. So
+   * a new run starts with the sign-in as it stands, carrying the
+   * conversation on (resume), and the old one goes. A turn under way, or a
+   * Claude still starting, finishes first.
+   */
+  async refresh(): Promise<void> {
+    if (this.final) return;
+    if (this.host.status() === "starting" || this.host.busy() || this.restarting) {
+      this.refreshWanted = true;
+      return;
+    }
+    await this.restart();
+  }
+
+  /** A refresh that waited: now, if nothing else is under way. */
+  private refreshIfWanted(): void {
+    if (!this.refreshWanted || this.final || this.host.busy() || this.restarting) return;
+    void this.restart().catch((e: Error) => {
+      if (!this.final) {
+        this.host.note("error", "api", `Could not pick up the new Claude sign-in: ${e.message} — start a new session.`);
+      }
+    });
+  }
+
+  private restart(): Promise<void> {
+    this.refreshWanted = false;
+    const run = this.swapRun().finally(() => {
+      this.restarting = null;
+      this.refreshIfWanted();
+    });
+    this.restarting = run.catch(() => {});
+    return run;
+  }
+
+  private async swapRun(): Promise<void> {
+    if (!this.launch || this.final) return;
+    const input = new InputQueue<SDKUserMessage>();
+    const abort = new AbortController();
+    let next: Awaited<ReturnType<Launcher>>;
+    try {
+      next = await this.launch({
+        input,
+        abort,
+        permissionMode: this.host.permissionMode(),
+        ...(this.claudeSessionId ? { resume: this.claudeSessionId } : {}),
+      });
+    } catch (e) {
+      input.close();
+      abort.abort();
+      throw e;
+    }
+    if (this.final) {
+      input.close();
+      abort.abort();
+      return;
+    }
+    const previous = { input: this.input, abort: this.abort };
+    this.input = input;
+    this.abort = abort;
+    this.query = next.query;
+    this.apiBaseUrl = next.apiBaseUrl;
+    this.firstResponseMs = next.firstResponseMs;
+    this.stderrTail = [];
+    this.stream.messageId = null;
+    previous.input.close();
+    previous.abort.abort();
+    void this.pump(next.query);
+    let account: ChatAccount | undefined;
+    try {
+      const info = await next.query.accountInfo?.();
+      if (info) account = describeAccount(info, this.apiBaseUrl);
+    } catch {
+      // Older binaries lack the request; the chip stays as it was.
+    }
+    if (this.final || this.query !== next.query) return;
+    if (account) this.host.update({ account });
+    this.host.note(
+      "info",
+      "init",
+      `Claude's sign-in changed — restarted with ${account ? account.label : "the new sign-in"}; the conversation carries on.`,
+    );
   }
 
   /**
@@ -475,18 +583,21 @@ class ClaudeSession implements AgentSession {
     }
     if (this.final) return;
     this.host.ready({ commands: this.commands, ...(account ? { account } : {}) });
+    this.refreshIfWanted();
   }
 
-  /** Read Claude's messages until it exits or we abort it. */
-  async pump(): Promise<void> {
+  /** Read a run's messages until it exits or we abort it; a run a refresh
+      replaced says nothing more. */
+  async pump(query: QueryLike): Promise<void> {
     try {
-      for await (const msg of this.query!) {
+      for await (const msg of query) {
+        if (query !== this.query) return;
         this.handleMessage(msg);
       }
-      if (!this.final) this.host.ended("Claude exited.");
+      if (!this.final && query === this.query) this.host.ended("Claude exited.");
     } catch (e) {
-      // Our own abort (end/shutdown) also ends the generator with an error.
-      if (this.final) return;
+      // Our own abort (end/shutdown, a refresh) also ends the generator with an error.
+      if (this.final || query !== this.query) return;
       const tail = this.stderrTail.join("\n");
       this.host.failed(
         tail ? `${(e as Error).message}\n${tail}` : (e as Error).message,
@@ -500,6 +611,7 @@ class ClaudeSession implements AgentSession {
     if (msg.type === "system" && msg.subtype === "init") {
       const first = !this.initSeen;
       this.initSeen = true;
+      this.claudeSessionId = msg.session_id;
       const mode = normalizePermissionMode(msg.permissionMode);
       // Normally the readiness probe has the commands already; if it did not
       // answer, the names from init stand until the control request does.
@@ -531,7 +643,10 @@ class ClaudeSession implements AgentSession {
       return;
     }
     for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream)) this.host.emit(body);
-    if (msg.type === "result") this.host.turnEnded();
+    if (msg.type === "result") {
+      this.host.turnEnded();
+      this.refreshIfWanted();
+    }
   }
 
   private async loadCommands(): Promise<void> {
@@ -639,48 +754,53 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
     },
     defaultPermissionMode: "auto",
     loginHint: {
-      text: "Claude is not signed in on this machine: sign in with your email in Settings → Claude, then start a new session.",
+      text: "Claude is not signed in on this machine: sign in with your email in Settings → Claude.",
     },
     async start(opts: AgentStartOptions): Promise<AgentSession> {
       const session = new ClaudeSession(opts.host);
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
-      // The sign-in Settings chose (src/server/claudeAuth.ts): the
-      // environment to inherit, and the `--settings` override that makes
-      // Claude Code honor the choice over its own settings files.
-      const launch = await claudeLaunch(await settings(), opts.cwd, await token());
-      session.apiBaseUrl = launch.apiBaseUrl;
-      session.firstResponseMs = Math.max(0, Math.floor((await firstResponseSeconds()) * 1000));
-      const sdkOptions: Options = {
-        cwd: opts.cwd,
-        pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
-        includePartialMessages: true,
-        permissionMode: opts.permissionMode,
-        // Lets the pane's mode select switch to bypass later; nothing
-        // bypasses unless the user picks it.
-        allowDangerouslySkipPermissions: true,
-        abortController: session.abort,
-        canUseTool: session.canUseTool,
-        // Claude Code's own system prompt, CLAUDE.md, skills and project
-        // commands — the point is a session like the one the CLI would open.
-        systemPrompt: { type: "preset", preset: "claude_code" },
-        settingSources: ["user", "project", "local"],
-        // With a code repo the specs live elsewhere; let Claude read them.
-        ...(opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {}),
-        env: launch.env,
-        ...(Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}),
-        stderr: session.stderr,
+      session.launch = async ({ input, abort, permissionMode, resume }) => {
+        // The sign-in Settings chose (src/auth.ts), read afresh for every
+        // run: the environment to inherit, and the `--settings` override
+        // that makes Claude Code honor the choice over its own settings files.
+        const launch = await claudeLaunch(await settings(), opts.cwd, await token());
+        const firstResponseMs = Math.max(0, Math.floor((await firstResponseSeconds()) * 1000));
+        const sdkOptions: Options = {
+          cwd: opts.cwd,
+          pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
+          includePartialMessages: true,
+          permissionMode,
+          // Lets the pane's mode select switch to bypass later; nothing
+          // bypasses unless the user picks it.
+          allowDangerouslySkipPermissions: true,
+          abortController: abort,
+          canUseTool: session.canUseTool,
+          // Claude Code's own system prompt, CLAUDE.md, skills and project
+          // commands — the point is a session like the one the CLI would open.
+          systemPrompt: { type: "preset", preset: "claude_code" },
+          settingSources: ["user", "project", "local"],
+          // With a code repo the specs live elsewhere; let Claude read them.
+          ...(opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {}),
+          ...(resume ? { resume } : {}),
+          env: launch.env,
+          ...(Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}),
+          stderr: session.stderr,
+        };
+        const query = await factory()({ prompt: input, options: sdkOptions });
+        return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
-      if (opts.prompt) {
-        session.input.push(userMessage(opts.prompt));
-        session.armFirstResponse();
-      }
+      if (opts.prompt) session.input.push(userMessage(opts.prompt));
       try {
-        session.query = await factory()({ prompt: session.input, options: sdkOptions });
+        const run = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
+        session.query = run.query;
+        session.apiBaseUrl = run.apiBaseUrl;
+        session.firstResponseMs = run.firstResponseMs;
       } catch (e) {
         session.close();
         throw e;
       }
-      void session.pump();
+      if (opts.prompt) session.armFirstResponse();
+      void session.pump(session.query);
       void session.ready();
       return session;
     },

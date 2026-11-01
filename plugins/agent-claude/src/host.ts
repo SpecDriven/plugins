@@ -19,6 +19,7 @@ import {
   loginState,
   loginStatus,
   logout as claudeLogout,
+  onSignInChange,
   startLogin,
   submitLoginCode,
 } from "./auth";
@@ -97,6 +98,14 @@ const plugin: Plugin<Context, HostConfig> = {
       agents.register(createClaudeProvider({ settings, token: () => storedToken(secrets) })),
     );
 
+    // A new sign-in — the email one done, Claude Code fetched for it, a
+    // sign-out, another mode, proxy or token — makes what the app holds of
+    // the old one stale: the pane's "not set up", a live session's account
+    // and credentials. The app re-reads the one and refreshes the other
+    // (AgentSession.refresh); an app from before `changed` restarts instead.
+    const signInChanged = () => (agents as { changed?(id: string): void }).changed?.("claude");
+    ctx.effect(() => onSignInChange(signInChanged));
+
     // The values that lived at the top of settings.json while Claude was
     // built in come into the plugin's section once.
     try {
@@ -130,11 +139,13 @@ const plugin: Plugin<Context, HostConfig> = {
         return json({ error: "Paste the proxy's token" }, 400);
       }
       await secrets.save({ token: body.token.trim() });
+      signInChanged();
       return answer();
     };
 
     const deleteToken: Handler = async () => {
       await secrets.clear();
+      signInChanged();
       return answer();
     };
 
@@ -146,6 +157,7 @@ const plugin: Plugin<Context, HostConfig> = {
       if (!detected.url) return json({ error: "No proxy found in Claude Code's settings or the environment" }, 404);
       await config.settings.write({ claudeProxyUrl: detected.url });
       if (detected.token) await secrets.save({ token: detected.token });
+      signInChanged();
       return answer();
     };
 
@@ -199,6 +211,7 @@ const plugin: Plugin<Context, HostConfig> = {
       const parsed = claudeSettingsPatch(await req.json().catch(() => null));
       if ("error" in parsed) return json({ error: parsed.error }, 400);
       await config.settings.write(parsed.patch);
+      if ("claudeAuth" in parsed.patch || "claudeProxyUrl" in parsed.patch) signInChanged();
       return json(await settings());
     };
 

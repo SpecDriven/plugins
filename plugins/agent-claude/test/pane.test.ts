@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { handleApi, reloader } from "@specdriven/app/src/server/api";
 import { createChatSession, endAllChatSessions, getChatEvents } from "@specdriven/app/src/server/agentChat";
+import { agents } from "@specdriven/app/src/plugins/host/agents";
 import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentTypes";
 import { createFeature, saveFeature } from "@specdriven/app/src/server/features";
 import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
@@ -812,6 +813,84 @@ test("a Claude session shows how it is billed once Claude Code says", async () =
 test("a Claude Code that does not say leaves the session without an account", async () => {
   const { id } = await idleSession();
   expect((await snapshot(id)).meta.account).toBeUndefined();
+});
+
+// --- a sign-in that changes under a live session -----------------------------
+// (specs/agents/claude.feature.md "A live session picks up a new sign-in"):
+// signed in with an email while a session ran, the pane kept the old
+// account until the app was restarted. An app from before the registry's
+// `changed` has no way to say so; there the plugin runs as before.
+
+const registry = agents as { changed?(id: string): void };
+const signInChanged = () => registry.changed!("claude");
+const withChanged = test.if(typeof registry.changed === "function");
+
+withChanged("a sign-in change restarts an idle Claude session under it, carrying the conversation on", async () => {
+  fakeAccount = {};
+  const { id, fake } = await idleSession();
+  expect((await snapshot(id)).meta.account).toMatchObject({ billing: "none", label: "Not logged in" });
+  expect((await api(`/api/agent/chat/${id}/mode`, "PUT", { permissionMode: "plan" })).status).toBe(200);
+  // One more that has not had a turn yet: no conversation to carry on.
+  const fresh = (await (await api("/api/agent/chat", "POST", { name: "fresh" })).json()) as ChatSessionMeta;
+  await untilStatus(fresh.id, "idle");
+  const freshFake = fakes.at(-1)!;
+
+  fakeAccount = { email: "ada@example.com", subscriptionType: "Claude Max", apiProvider: "firstParty" };
+  signInChanged();
+  const snap = await until(() => snapshot(id), (s) => s.meta.account?.label === "Claude Max");
+  expect(snap.meta.status).toBe("idle");
+  expect(snap.events.filter((e) => e.kind === "note").at(-1)).toMatchObject({
+    level: "info",
+    text: "Claude's sign-in changed — restarted with Claude Max; the conversation carries on.",
+  });
+  // The next run resumes Claude Code's conversation, in the mode the pane is in;
+  // the old one is gone.
+  const next = fakes.find((f) => f.options.resume === "claude-1")!;
+  expect(next.options.permissionMode).toBe("plan");
+  expect(next.options.cwd).toBe(data);
+  expect(fake.options.abortController!.signal.aborted).toBe(true);
+  const freshNext = await until(async () => fakes.filter((f) => f !== freshFake && f !== fake && f !== next), (l) => l.length === 1);
+  expect(freshNext[0]!.options.resume).toBeUndefined();
+  expect(freshFake.options.abortController!.signal.aborted).toBe(true);
+
+  // The next turn goes to the new run, and the old one's end is not the session's.
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "carry on" });
+  expect((await next.input(1)).message.content).toBe("carry on");
+  expect(fake.inputs).toHaveLength(0);
+  next.emit(init());
+  next.emit(result());
+  const after = await untilStatus(id, "idle");
+  expect(after.events.some((e) => e.kind === "note" && e.code === "ended")).toBe(false);
+});
+
+withChanged("a turn under way finishes before the session picks up a new sign-in", async () => {
+  const { id, fake } = await idleSession();
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hi" });
+  await fake.input(1);
+  signInChanged();
+  await Bun.sleep(30);
+  expect(fakes).toHaveLength(1);
+  expect(fake.options.abortController!.signal.aborted).toBe(false);
+
+  fake.emit(result());
+  const next = (await until(async () => fakes[1], (f) => f !== undefined))!;
+  expect(next.options.resume).toBe("claude-1");
+  await until(() => snapshot(id), (s) => s.events.some((e) => e.kind === "note" && e.text.includes("sign-in changed")));
+  expect((await snapshot(id)).meta.status).toBe("idle");
+});
+
+withChanged("a new sign-in that cannot start Claude leaves the session as it was, saying so", async () => {
+  const { id, fake } = await idleSession();
+  setQueryFactory(() => {
+    throw new Error("spawn claude ENOENT");
+  });
+  signInChanged();
+  const snap = await until(() => snapshot(id), (s) => s.events.some((e) => e.kind === "note" && e.level === "error"));
+  expect(snap.events.filter((e) => e.kind === "note").at(-1)).toMatchObject({
+    text: "Could not pick up the new Claude sign-in: spawn claude ENOENT — start a new session.",
+  });
+  expect(snap.meta.status).toBe("idle");
+  expect(fake.options.abortController!.signal.aborted).toBe(false);
 });
 
 test("describeAccount names a moved base URL, a local one as a proxy", () => {
