@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../src/host.ts"],
+  "sourcesContent": [
+    "// The host half: runs inside the SpecDriven server (or the desktop app's\n// main process). Everything it registers is an effect, unwound when the\n// plugin is switched off — its routes answer 404 from then on.\n\ntype Disposer = () => void | Promise<void>;\ntype Handler = (req: Request, params: Record<string, string>) => Response | Promise<Response>;\n\n/** The services this plugin asks for (see src/plugins/host/services.ts in the app). */\ninterface Ctx {\n  need(key: \"routes\"): { add(method: string, pattern: string, handler: Handler): Disposer };\n  need(key: \"data\"): {\n    withDir(handler: (dir: string, req: Request, params: Record<string, string>) => Response | Promise<Response>): Handler;\n  };\n  effect(run: () => Disposer): Disposer;\n}\n\nexport default {\n  name: \"hello-tab\",\n  inject: [\"routes\", \"data\"],\n  apply(ctx: Ctx) {\n    const routes = ctx.need(\"routes\");\n    const data = ctx.need(\"data\");\n    ctx.effect(() =>\n      routes.add(\n        \"GET\",\n        \"/api/hello-tab\",\n        data.withDir(async (dir) => Response.json({ plugin: \"hello-tab\", dataDir: dir })),\n      ),\n    );\n  },\n};\n"
+  ],
+  "mappings": ";AAgBA,IAAe;AAAA,EACb,MAAM;AAAA,EACN,QAAQ,CAAC,UAAU,MAAM;AAAA,EACzB,KAAK,CAAC,KAAU;AAAA,IACd,MAAM,SAAS,IAAI,KAAK,QAAQ;AAAA,IAChC,MAAM,OAAO,IAAI,KAAK,MAAM;AAAA,IAC5B,IAAI,OAAO,MACT,OAAO,IACL,OACA,kBACA,KAAK,QAAQ,OAAO,QAAQ,SAAS,KAAK,EAAE,QAAQ,aAAa,SAAS,IAAI,CAAC,CAAC,CAClF,CACF;AAAA;AAEJ;",
+  "debugId": "C51264266027B94364756E2164756E21",
+  "names": []
+}
