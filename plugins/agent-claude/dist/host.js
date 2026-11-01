@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44924,6 +44924,22 @@ async function loginStatus(runner = run) {
   return parseLoginStatus(result.stdout);
 }
 var flow = null;
+var signInListeners = new Set;
+function onSignInChange(fn) {
+  signInListeners.add(fn);
+  return () => {
+    signInListeners.delete(fn);
+  };
+}
+function signInChanged() {
+  for (const fn of [...signInListeners]) {
+    try {
+      fn();
+    } catch (e) {
+      console.error(`[agent-claude] sign-in listener: ${e.message}`);
+    }
+  }
+}
 var LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 var LOGIN_POLL_MS = 2000;
 var URL_WAIT_MS = 1500;
@@ -44961,6 +44977,8 @@ function finish(f, error) {
     child.kill();
   for (const wake of f.urlWaiters.splice(0))
     wake();
+  if (error === null || f.fetched)
+    signInChanged();
 }
 async function startLogin(email, deps = {}) {
   const address = email.trim();
@@ -44977,6 +44995,7 @@ async function startLogin(email, deps = {}) {
     email: address,
     url: null,
     downloading: !claude,
+    fetched: false,
     acceptsCode: false,
     done: false,
     error: null,
@@ -44993,6 +45012,7 @@ async function startLogin(email, deps = {}) {
     if (!f.inProgress)
       return;
     f.downloading = false;
+    f.fetched = true;
     launchLogin(f, fetched, deps);
   }, (e) => finish(f, e.message));
   return publicState(f);
@@ -45089,6 +45109,7 @@ async function logout(runner = run) {
   if (result.exitCode !== 0) {
     throw new ClaudeAuthError(`Could not sign out: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`, 502);
   }
+  signInChanged();
 }
 async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   let target;
@@ -45164,7 +45185,7 @@ function describeAccount(info, baseUrl) {
     const source = apiKey ?? token ?? "claude.ai login without a plan";
     return { billing: "api", label: "API billing", detail: detailOf("Billed per token", source) };
   }
-  return { billing: "none", label: "Not logged in", detail: "Run claude auth login in a terminal, then start a new session." };
+  return { billing: "none", label: "Not logged in", detail: "Sign in with your Claude account's email in Settings → Claude." };
 }
 
 class InputQueue {
@@ -45354,6 +45375,10 @@ class ClaudeSession {
   input = new InputQueue;
   abort = new AbortController;
   query = null;
+  launch = null;
+  claudeSessionId = null;
+  refreshWanted = false;
+  restarting = null;
   initSeen = false;
   commands = [];
   stderrTail = [];
@@ -45392,6 +45417,8 @@ class ClaudeSession {
     };
   };
   async send(text) {
+    if (this.restarting)
+      await this.restarting;
     this.input.push(userMessage(text));
     this.armFirstResponse();
   }
@@ -45409,6 +45436,79 @@ class ClaudeSession {
     this.input.close();
     this.abort.abort();
   }
+  async refresh() {
+    if (this.final)
+      return;
+    if (this.host.status() === "starting" || this.host.busy() || this.restarting) {
+      this.refreshWanted = true;
+      return;
+    }
+    await this.restart();
+  }
+  refreshIfWanted() {
+    if (!this.refreshWanted || this.final || this.host.busy() || this.restarting)
+      return;
+    this.restart().catch((e) => {
+      if (!this.final) {
+        this.host.note("error", "api", `Could not pick up the new Claude sign-in: ${e.message} — start a new session.`);
+      }
+    });
+  }
+  restart() {
+    this.refreshWanted = false;
+    const run2 = this.swapRun().finally(() => {
+      this.restarting = null;
+      this.refreshIfWanted();
+    });
+    this.restarting = run2.catch(() => {});
+    return run2;
+  }
+  async swapRun() {
+    if (!this.launch || this.final)
+      return;
+    const input = new InputQueue;
+    const abort = new AbortController;
+    let next;
+    try {
+      next = await this.launch({
+        input,
+        abort,
+        permissionMode: this.host.permissionMode(),
+        ...this.claudeSessionId ? { resume: this.claudeSessionId } : {}
+      });
+    } catch (e) {
+      input.close();
+      abort.abort();
+      throw e;
+    }
+    if (this.final) {
+      input.close();
+      abort.abort();
+      return;
+    }
+    const previous = { input: this.input, abort: this.abort };
+    this.input = input;
+    this.abort = abort;
+    this.query = next.query;
+    this.apiBaseUrl = next.apiBaseUrl;
+    this.firstResponseMs = next.firstResponseMs;
+    this.stderrTail = [];
+    this.stream.messageId = null;
+    previous.input.close();
+    previous.abort.abort();
+    this.pump(next.query);
+    let account;
+    try {
+      const info = await next.query.accountInfo?.();
+      if (info)
+        account = describeAccount(info, this.apiBaseUrl);
+    } catch {}
+    if (this.final || this.query !== next.query)
+      return;
+    if (account)
+      this.host.update({ account });
+    this.host.note("info", "init", `Claude's sign-in changed — restarted with ${account ? account.label : "the new sign-in"}; the conversation carries on.`);
+  }
   async ready() {
     try {
       const commands = await this.query.supportedCommands();
@@ -45425,16 +45525,19 @@ class ClaudeSession {
     if (this.final)
       return;
     this.host.ready({ commands: this.commands, ...account ? { account } : {} });
+    this.refreshIfWanted();
   }
-  async pump() {
+  async pump(query) {
     try {
-      for await (const msg of this.query) {
+      for await (const msg of query) {
+        if (query !== this.query)
+          return;
         this.handleMessage(msg);
       }
-      if (!this.final)
+      if (!this.final && query === this.query)
         this.host.ended("Claude exited.");
     } catch (e) {
-      if (this.final)
+      if (this.final || query !== this.query)
         return;
       const tail = this.stderrTail.join(`
 `);
@@ -45447,6 +45550,7 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
     if (msg.type === "system" && msg.subtype === "init") {
       const first = !this.initSeen;
       this.initSeen = true;
+      this.claudeSessionId = msg.session_id;
       const mode = normalizePermissionMode(msg.permissionMode);
       if (this.commands.length === 0) {
         this.commands = msg.slash_commands.map((name) => ({ name, description: "", argumentHint: "" }));
@@ -45474,8 +45578,10 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
     }
     for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream))
       this.host.emit(body);
-    if (msg.type === "result")
+    if (msg.type === "result") {
       this.host.turnEnded();
+      this.refreshIfWanted();
+    }
   }
   async loadCommands() {
     try {
@@ -45544,40 +45650,47 @@ function createClaudeProvider(options = {}) {
     },
     defaultPermissionMode: "auto",
     loginHint: {
-      text: "Claude is not signed in on this machine: sign in with your email in Settings → Claude, then start a new session."
+      text: "Claude is not signed in on this machine: sign in with your email in Settings → Claude."
     },
     async start(opts) {
       const session = new ClaudeSession(opts.host);
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
-      const launch = await claudeLaunch(await settings(), opts.cwd, await token());
-      session.apiBaseUrl = launch.apiBaseUrl;
-      session.firstResponseMs = Math.max(0, Math.floor(await firstResponseSeconds() * 1000));
-      const sdkOptions = {
-        cwd: opts.cwd,
-        pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
-        includePartialMessages: true,
-        permissionMode: opts.permissionMode,
-        allowDangerouslySkipPermissions: true,
-        abortController: session.abort,
-        canUseTool: session.canUseTool,
-        systemPrompt: { type: "preset", preset: "claude_code" },
-        settingSources: ["user", "project", "local"],
-        ...opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {},
-        env: launch.env,
-        ...Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {},
-        stderr: session.stderr
+      session.launch = async ({ input, abort, permissionMode, resume }) => {
+        const launch = await claudeLaunch(await settings(), opts.cwd, await token());
+        const firstResponseMs = Math.max(0, Math.floor(await firstResponseSeconds() * 1000));
+        const sdkOptions = {
+          cwd: opts.cwd,
+          pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
+          includePartialMessages: true,
+          permissionMode,
+          allowDangerouslySkipPermissions: true,
+          abortController: abort,
+          canUseTool: session.canUseTool,
+          systemPrompt: { type: "preset", preset: "claude_code" },
+          settingSources: ["user", "project", "local"],
+          ...opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {},
+          ...resume ? { resume } : {},
+          env: launch.env,
+          ...Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {},
+          stderr: session.stderr
+        };
+        const query = await factory()({ prompt: input, options: sdkOptions });
+        return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
-      if (opts.prompt) {
+      if (opts.prompt)
         session.input.push(userMessage(opts.prompt));
-        session.armFirstResponse();
-      }
       try {
-        session.query = await factory()({ prompt: session.input, options: sdkOptions });
+        const run2 = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
+        session.query = run2.query;
+        session.apiBaseUrl = run2.apiBaseUrl;
+        session.firstResponseMs = run2.firstResponseMs;
       } catch (e) {
         session.close();
         throw e;
       }
-      session.pump();
+      if (opts.prompt)
+        session.armFirstResponse();
+      session.pump(session.query);
       session.ready();
       return session;
     },
@@ -45677,6 +45790,8 @@ var plugin = {
     const secrets = config.secrets(TOKEN_STORE);
     const settings = async () => claudeSettingsOf(await config.settings.read());
     ctx.effect(() => agents2.register(createClaudeProvider({ settings, token: () => storedToken(secrets) })));
+    const signInChanged2 = () => agents2.changed?.("claude");
+    ctx.effect(() => onSignInChange(signInChanged2));
     try {
       await config.settings.adopt(CLAUDE_LEGACY_KEYS);
       if ((await config.settings.read())[ADOPTED_KEY] !== true)
@@ -45703,10 +45818,12 @@ var plugin = {
         return json({ error: "Paste the proxy's token" }, 400);
       }
       await secrets.save({ token: body.token.trim() });
+      signInChanged2();
       return answer();
     };
     const deleteToken = async () => {
       await secrets.clear();
+      signInChanged2();
       return answer();
     };
     const postProxyDetect = async () => {
@@ -45716,6 +45833,7 @@ var plugin = {
       await config.settings.write({ claudeProxyUrl: detected.url });
       if (detected.token)
         await secrets.save({ token: detected.token });
+      signInChanged2();
       return answer();
     };
     const postProxyCheck = async (req) => {
@@ -45760,6 +45878,8 @@ var plugin = {
       if ("error" in parsed)
         return json({ error: parsed.error }, 400);
       await config.settings.write(parsed.patch);
+      if ("claudeAuth" in parsed.patch || "claudeProxyUrl" in parsed.patch)
+        signInChanged2();
       return json(await settings());
     };
     const add = (method, pattern, handler) => ctx.effect(() => routes.add(method, pattern, guarded(handler)));
@@ -45784,5 +45904,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=DDB3F355FC4AFE5264756E2164756E21
+//# debugId=EF5FAA78BDF20E1464756E2164756E21
 //# sourceMappingURL=host.js.map

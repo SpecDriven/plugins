@@ -1,6 +1,6 @@
 {
   "name": "@specdriven/plugin-agent-claude",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "license": "Apache-2.0",
   "description": "Claude Code in the coding agent pane, with its sign-in and proxy settings",
   "type": "module",

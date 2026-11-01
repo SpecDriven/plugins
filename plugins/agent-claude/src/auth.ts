@@ -253,6 +253,9 @@ export interface LoginState {
 interface LoginFlow extends Omit<LoginState, "download"> {
   /** Fetching Claude Code before the sign-in can start. */
   downloading: boolean;
+  /** Claude Code was fetched for this sign-in: there is one now, whatever
+      became of the sign-in. */
+  fetched: boolean;
   child: ChildProcess | null;
   output: string[];
   timer: ReturnType<typeof setTimeout> | null;
@@ -261,6 +264,29 @@ interface LoginFlow extends Omit<LoginState, "download"> {
 }
 
 let flow: LoginFlow | null = null;
+
+// Who wants to know that the sign-in changed (src/host.ts tells the app,
+// which refreshes the pane and the live sessions).
+const signInListeners = new Set<() => void>();
+
+/** Call `fn` whenever the sign-in changes: a sign-in done, Claude Code
+    fetched, a sign-out. Returns the unsubscribe. */
+export function onSignInChange(fn: () => void): () => void {
+  signInListeners.add(fn);
+  return () => {
+    signInListeners.delete(fn);
+  };
+}
+
+function signInChanged(): void {
+  for (const fn of [...signInListeners]) {
+    try {
+      fn();
+    } catch (e) {
+      console.error(`[agent-claude] sign-in listener: ${(e as Error).message}`);
+    }
+  }
+}
 
 export interface LoginDeps {
   spawn?: typeof nodeSpawn;
@@ -314,6 +340,7 @@ function finish(f: LoginFlow, error: string | null): void {
   f.child = null;
   if (child && child.exitCode === null) child.kill();
   for (const wake of f.urlWaiters.splice(0)) wake();
+  if (error === null || f.fetched) signInChanged();
 }
 
 /**
@@ -336,6 +363,7 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
     email: address,
     url: null,
     downloading: !claude,
+    fetched: false,
     acceptsCode: false,
     done: false,
     error: null,
@@ -351,6 +379,7 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
     (fetched) => {
       if (!f.inProgress) return;
       f.downloading = false;
+      f.fetched = true;
       void launchLogin(f, fetched, deps);
     },
     (e: Error) => finish(f, e.message),
@@ -456,6 +485,7 @@ export async function logout(runner: Runner = run): Promise<void> {
   if (result.exitCode !== 0) {
     throw new ClaudeAuthError(`Could not sign out: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`, 502);
   }
+  signInChanged();
 }
 
 // ---------------------------------------------------------------------------
