@@ -45,7 +45,7 @@
       "name": "agent-codex",
       "source": "./plugins/agent-codex",
       "description": "OpenAI Codex in the coding agent pane, over the Codex CLI's app server",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "category": "agents",
       "api": "1",
       "agent": {

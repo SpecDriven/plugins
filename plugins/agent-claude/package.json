@@ -25,7 +25,7 @@
       "host": "./src/host.ts",
       "client": "./src/client.tsx"
     },
-    "minAppVersion": "0.1.186",
+    "minAppVersion": "0.1.196",
     "defaultEnabled": true,
     "autoEnable": true,
     "permissions": [
