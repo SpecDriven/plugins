@@ -22,7 +22,7 @@
     "src": {
       "host": "./src/host.ts"
     },
-    "minAppVersion": "0.1.186",
+    "minAppVersion": "0.1.196",
     "defaultEnabled": true,
     "autoEnable": true,
     "permissions": [
