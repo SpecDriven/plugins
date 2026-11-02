@@ -19,7 +19,7 @@ fails until the pins match the dependency).
 
 What it keeps: its settings under `pluginSettings["agent-claude"]` in the
 app's settings.json (the sign-in mode, the proxy url, the pane's
-first-response wait), adopting the top-level keys they had while built in;
+first-response wait, the default model), adopting the top-level keys they had while built in;
 the proxy token in the app's secret store (`~/.specdriven/secrets/`, or the
 OS keychain in the desktop app); the downloaded Claude Code, when there was
 no `claude`.

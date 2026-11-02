@@ -384,6 +384,8 @@ interface LaunchArgs {
   permissionMode: PermissionMode;
   /** Claude Code's id for the conversation to carry on, from a run before. */
   resume?: string;
+  /** The model the run before ran on, which the conversation keeps. */
+  model?: string;
 }
 
 /** Start one Claude Code run with the sign-in as it stands now. */
@@ -399,6 +401,8 @@ class ClaudeSession implements AgentSession {
   launch: Launcher | null = null;
   /** Claude Code's id for the conversation (init), which a new run resumes. */
   private claudeSessionId: string | null = null;
+  /** The model Claude Code said it runs on (init), which a new run keeps. */
+  private model: string | null = null;
   /** A sign-in change came while a turn ran or Claude was starting. */
   private refreshWanted = false;
   /** The new run being started; a message typed meanwhile waits for it. */
@@ -523,6 +527,7 @@ class ClaudeSession implements AgentSession {
         abort,
         permissionMode: this.host.permissionMode(),
         ...(this.claudeSessionId ? { resume: this.claudeSessionId } : {}),
+        ...(this.claudeSessionId && this.model ? { model: this.model } : {}),
       });
     } catch (e) {
       input.close();
@@ -619,6 +624,7 @@ class ClaudeSession implements AgentSession {
         this.commands = msg.slash_commands.map((name) => ({ name, description: "", argumentHint: "" }));
         void this.loadCommands();
       }
+      if (msg.model) this.model = msg.model;
       // Later inits only refresh the facts above.
       if (!first) {
         this.host.update(
@@ -759,12 +765,17 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
     async start(opts: AgentStartOptions): Promise<AgentSession> {
       const session = new ClaudeSession(opts.host);
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
-      session.launch = async ({ input, abort, permissionMode, resume }) => {
+      session.launch = async ({ input, abort, permissionMode, resume, model }) => {
         // The sign-in Settings chose (src/auth.ts), read afresh for every
         // run: the environment to inherit, and the `--settings` override
         // that makes Claude Code honor the choice over its own settings files.
-        const launch = await claudeLaunch(await settings(), opts.cwd, await token());
+        const own = await settings();
+        const launch = await claudeLaunch(own, opts.cwd, await token());
         const firstResponseMs = Math.max(0, Math.floor((await firstResponseSeconds()) * 1000));
+        // A carried-on conversation keeps the model it ran on, whatever the
+        // default says now; a new one starts on the default Settings names,
+        // else Claude Code's own.
+        const runModel = model ?? own.defaultModel;
         const sdkOptions: Options = {
           cwd: opts.cwd,
           pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
@@ -782,6 +793,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
           // With a code repo the specs live elsewhere; let Claude read them.
           ...(opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {}),
           ...(resume ? { resume } : {}),
+          ...(runModel ? { model: runModel } : {}),
           env: launch.env,
           ...(Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}),
           stderr: session.stderr,
@@ -810,7 +822,11 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
       const prompt = new InputQueue<SDKUserMessage>();
       prompt.push(userMessage(req.prompt));
       prompt.close();
-      const launch = await claudeLaunch(await settings(), req.cwd, await token());
+      const own = await settings();
+      const launch = await claudeLaunch(own, req.cwd, await token());
+      // A model the caller asks for, else the default Settings names, else
+      // Claude Code's own.
+      const model = req.model ?? own.defaultModel;
       const timer = setTimeout(() => abortController.abort(), req.timeoutMs);
       try {
         const query = await factory()({
@@ -829,7 +845,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
             // Leaves nothing in ~/.claude/projects: this is not a session.
             persistSession: false,
             thinking: { type: "disabled" },
-            ...(req.model ? { model: req.model } : {}),
+            ...(model ? { model } : {}),
             ...(req.schema ? { outputFormat: { type: "json_schema", schema: req.schema } } : {}),
             abortController,
             env: launch.env,

@@ -32,7 +32,13 @@ import {
 } from "../src/auth";
 import { BINARY_PINS, binaryPath, binaryPlatform, fetchBinary, installedBinary } from "../src/binary";
 import { setClaudeAvailability } from "../src/cli";
-import { claudeSettingsOf, normalizeClaudeAuth, normalizeClaudeProxyUrl, type ClaudeSettingsValues } from "../src/settings";
+import {
+  claudeSettingsOf,
+  normalizeClaudeAuth,
+  normalizeClaudeProxyUrl,
+  normalizeDefaultModel,
+  type ClaudeSettingsValues,
+} from "../src/settings";
 import { mountPlugin, quietProfile } from "./app";
 import { integrityOf, packageTarball, servingFetch } from "./registry";
 
@@ -40,7 +46,7 @@ import { integrityOf, packageTarball, servingFetch } from "./registry";
 const tokenStore = () => secretStore("agent-claude.token");
 const token = async () => (await tokenStore().load())?.token ?? null;
 /** The plugin's values with what a test sets, the rest default. */
-const vals = (o: Partial<ClaudeSettingsValues>): ClaudeSettingsValues => ({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15, ...o });
+const vals = (o: Partial<ClaudeSettingsValues>): ClaudeSettingsValues => ({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15, defaultModel: null, ...o });
 let unmount: () => Promise<void> = async () => {};
 
 const realRoot = process.env.SPECDRIVEN_ROOT;
@@ -152,6 +158,17 @@ test("the stored choice is normalized; a url must be http(s)", () => {
   expect(normalizeClaudeProxyUrl("ftp://x")).toBeNull();
   expect(normalizeClaudeProxyUrl("")).toBeNull();
   expect(normalizeClaudeProxyUrl(7)).toBeNull();
+});
+
+test("the default model is an alias or a model id, trimmed; anything else is Claude Code's own", () => {
+  expect(normalizeDefaultModel(" opus ")).toBe("opus");
+  expect(normalizeDefaultModel("claude-sonnet-4-5[1m]")).toBe("claude-sonnet-4-5[1m]");
+  expect(normalizeDefaultModel("us.anthropic.claude-opus-4-5-20251101-v1:0")).toBe("us.anthropic.claude-opus-4-5-20251101-v1:0");
+  expect(normalizeDefaultModel("")).toBeNull();
+  expect(normalizeDefaultModel("claude opus")).toBeNull();
+  expect(normalizeDefaultModel("--dangerously-skip-permissions")).toBeNull();
+  expect(normalizeDefaultModel("x".repeat(201))).toBeNull();
+  expect(normalizeDefaultModel(7)).toBeNull();
 });
 
 // --- the mode in effect, and the launch it makes ---------------------------
@@ -661,9 +678,10 @@ test("the demo and the hosted app have no Claude sign-in", async () => {
 
 // The Claude agent plugin's own settings (src/settings.ts,
 // specs/agents/agent-plugins.feature.md "The Settings page
-// shows a plugin's section"): the sign-in, the proxy url and the pane's
-// first-response wait live in the plugin's section of settings.json, taken
-// over from the top-level keys once, and change through its own route.
+// shows a plugin's section"): the sign-in, the proxy url, the pane's
+// first-response wait and the default model live in the plugin's section of
+// settings.json, taken over from the top-level keys once, and change through
+// its own route.
 test("the plugin adopts the old top-level keys once, and PUT /api/claude/settings changes its own section", async () => {
   await unmount();
   await writeState(
@@ -677,29 +695,45 @@ test("the plugin adopts the old top-level keys once, and PUT /api/claude/setting
   });
   // The old keys stay in the file; nothing reads them any more.
   expect((adopted as Record<string, unknown>).claudeAuth).toBe("proxy");
-  expect(claudeSettingsOf(pluginSection(adopted as Record<string, unknown>, "agent-claude"))).toEqual({ claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", firstResponseSeconds: 30 });
+  expect(claudeSettingsOf(pluginSection(adopted as Record<string, unknown>, "agent-claude"))).toEqual(
+    vals({ claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", firstResponseSeconds: 30 }),
+  );
 
   const own = await call("GET", "/api/claude/settings");
   expect(own.status).toBe(200);
-  expect(own.body).toEqual({ claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", firstResponseSeconds: 30 });
-  const changed = await call("PUT", "/api/claude/settings", { claudeAuth: "login", claudeProxyUrl: " http://new.test:9/ ", firstResponseSeconds: 15 });
+  expect(own.body).toEqual({ claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", firstResponseSeconds: 30, defaultModel: null });
+  const changed = await call("PUT", "/api/claude/settings", {
+    claudeAuth: "login",
+    claudeProxyUrl: " http://new.test:9/ ",
+    firstResponseSeconds: 15,
+    defaultModel: " sonnet ",
+  });
   expect(changed.status).toBe(200);
-  expect(changed.body).toEqual({ claudeAuth: "login", claudeProxyUrl: "http://new.test:9/", firstResponseSeconds: 15 });
+  expect(changed.body).toEqual({ claudeAuth: "login", claudeProxyUrl: "http://new.test:9/", firstResponseSeconds: 15, defaultModel: "sonnet" });
   // The section wins over the old keys; the default wait is stored as no key.
   const after = await readState(root);
-  expect(after.pluginSettings).toEqual({ "agent-claude": { adopted: true, claudeAuth: "login", claudeProxyUrl: "http://new.test:9/" } });
+  expect(after.pluginSettings).toEqual({
+    "agent-claude": { adopted: true, claudeAuth: "login", claudeProxyUrl: "http://new.test:9/", defaultModel: "sonnet" },
+  });
   expect((after as Record<string, unknown>).claudeAuth).toBe("proxy");
-  expect((await call("GET", "/api/claude/auth")).body).toMatchObject({ mode: "login", inferred: false, firstResponseSeconds: 15 });
+  expect((await call("GET", "/api/claude/auth")).body).toMatchObject({
+    mode: "login",
+    inferred: false,
+    firstResponseSeconds: 15,
+    defaultModel: "sonnet",
+  });
 
-  // Null forgets a choice; a bad value is refused; the old top-level keys are no settings any more.
-  const forgotten = await call("PUT", "/api/claude/settings", { claudeAuth: null, claudeProxyUrl: null });
-  expect(forgotten.body).toMatchObject({ claudeAuth: null, claudeProxyUrl: null });
+  // Null or "" forgets a choice; a bad value is refused; the old top-level keys are no settings any more.
+  const forgotten = await call("PUT", "/api/claude/settings", { claudeAuth: null, claudeProxyUrl: null, defaultModel: "" });
+  expect(forgotten.body).toMatchObject({ claudeAuth: null, claudeProxyUrl: null, defaultModel: null });
   expect((await call("PUT", "/api/claude/settings", { claudeAuth: "ldap" })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", { firstResponseSeconds: -1 })).status).toBe(400);
+  expect((await call("PUT", "/api/claude/settings", { defaultModel: "claude opus" })).status).toBe(400);
+  expect((await call("PUT", "/api/claude/settings", { defaultModel: 4 })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", {})).status).toBe(400);
   expect((await call("PUT", "/api/state", { claudeAuth: "proxy", agentFirstResponseSeconds: 5 })).status).toBe(400);
   expect((await readState(root)).pluginSettings).toEqual({ "agent-claude": { adopted: true } });
-  expect((await call("GET", "/api/claude/settings")).body).toEqual({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15 });
+  expect((await call("GET", "/api/claude/settings")).body).toEqual({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15, defaultModel: null });
 });
 
 test("a Claude plugin switched off takes its routes and its provider away", async () => {

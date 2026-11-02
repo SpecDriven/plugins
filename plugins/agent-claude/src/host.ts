@@ -3,7 +3,7 @@
 // the app's agent registry (src/provider.ts), and the routes for how Claude
 // signs in — the mode, what Claude Code's own settings say of a proxy, the
 // login driven from Settings, a check of the proxy, and the plugin's own
-// settings. The proxy token lives in the plugin's secret store and never
+// settings — among them the model a new Claude starts on. The proxy token lives in the plugin's secret store and never
 // leaves the host; the page learns only whether there is one. A local
 // Claude only, so every route refuses in the hosted app and the demo.
 
@@ -28,6 +28,7 @@ import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
 import { createClaudeProvider } from "./provider";
 import { ADOPTED_KEY, CLAUDE_LEGACY_KEYS, claudeSettingsOf, claudeSettingsPatch } from "./settings";
+import type { ClaudeSettingsValues } from "./settings";
 
 export const DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 
@@ -49,7 +50,7 @@ function tilde(path: string | null): string | null {
   return path && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 
-function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus, firstResponseSeconds: number) {
+function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus, own: ClaudeSettingsValues) {
   return {
     mode: auth.mode,
     inferred: auth.inferred,
@@ -71,7 +72,9 @@ function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus, firstResp
       },
     },
     /** The pane's first-response wait behind the proxy; 0 is no limit. */
-    firstResponseSeconds,
+    firstResponseSeconds: own.firstResponseSeconds,
+    /** The model a new Claude starts on; null is Claude Code's own default. */
+    defaultModel: own.defaultModel,
     signIn: loginState(),
   };
 }
@@ -128,7 +131,7 @@ const plugin: Plugin<Context, HostConfig> = {
     const answer = async (): Promise<Response> => {
       const own = await settings();
       const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
-      return json(claudeAuthView(auth, await loginStatus(), own.firstResponseSeconds));
+      return json(claudeAuthView(auth, await loginStatus(), own));
     };
 
     const getAuth: Handler = () => answer();

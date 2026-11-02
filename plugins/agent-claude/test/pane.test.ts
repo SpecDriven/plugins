@@ -1039,6 +1039,26 @@ test("the first-response wait is a setting, 15 seconds unless changed", async ()
   expect(bad.status).toBe(400);
 });
 
+test("a new session starts on the default model Settings names, else Claude Code's own", async () => {
+  expect((await api("/api/agent/chat", "POST", { name: "plain" })).status).toBe(200);
+  expect("model" in fakes.at(-1)!.options).toBe(false);
+
+  await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "sonnet" } }, ...quietProfile(data) }, root);
+  expect((await api("/api/agent/chat", "POST", { name: "sonnet" })).status).toBe(200);
+  expect(fakes.at(-1)!.options.model).toBe("sonnet");
+});
+
+withChanged("a session carried on under a new sign-in keeps the model it ran on", async () => {
+  await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "opus" } }, ...quietProfile(data) }, root);
+  const { fake } = await idleSession();
+  expect(fake.options.model).toBe("opus");
+  // Claude Code resolved the alias; the default changes meanwhile.
+  await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "haiku" } }, ...quietProfile(data) }, root);
+  signInChanged();
+  const next = await until(async () => fakes.find((f) => f.options.resume === "claude-1"), (f) => f !== undefined);
+  expect(next!.options.model).toBe("claude-opus-5");
+});
+
 test("the sign-in Settings chose reaches Claude as a --settings override (src/auth.ts)", async () => {
   // The proxy: the plugin's url and token, over whatever Claude Code's files say.
   const choose = (section: Record<string, unknown>) =>
