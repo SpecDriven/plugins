@@ -31,11 +31,12 @@ afterEach(async () => {
 
 /** A provider whose queries answer `{"ok": true}` at once, with the default
     model Settings names; the options each was started with. */
-function answering(defaultModel: string | null = null) {
+function answering(defaultModel: string | null = null, listed: string[] = []) {
   const started: Options[] = [];
   const provider = createClaudeProvider({
     available: () => true,
     settings: async () => ({ ...DEFAULT_SETTINGS, defaultModel }),
+    listedModels: async () => listed,
     query: ({ prompt, options }: { prompt: AsyncIterable<SDKUserMessage> | string; options: Options }) => {
       void prompt;
       started.push(options);
@@ -79,4 +80,13 @@ test("no model asked for and none in Settings leaves Claude Code's own default",
   const { provider, started } = answering();
   await provider.oneShot!(request);
   expect("model" in started[0]!).toBe(false);
+});
+
+test("no model asked for and none in Settings is the first the data repo lists for Claude", async () => {
+  const { provider, started } = answering(null, ["claude-sonnet-4-6", "opus"]);
+  await provider.oneShot!(request);
+  expect(started[0]!.model).toBe("claude-sonnet-4-6");
+  const set = answering("opus", ["claude-sonnet-4-6", "opus"]);
+  await set.provider.oneShot!(request);
+  expect(set.started[0]!.model).toBe("opus");
 });

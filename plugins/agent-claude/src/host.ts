@@ -26,6 +26,7 @@ import {
 import type { EffectiveClaudeAuth, LoginStatus } from "./auth";
 import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
+import { listedClaudeModels } from "./models";
 import { createClaudeProvider } from "./provider";
 import { ADOPTED_KEY, CLAUDE_LEGACY_KEYS, claudeSettingsOf, claudeSettingsPatch } from "./settings";
 import type { ClaudeSettingsValues } from "./settings";
@@ -98,7 +99,13 @@ const plugin: Plugin<Context, HostConfig> = {
     const settings = async () => claudeSettingsOf(await config.settings.read());
 
     ctx.effect(() =>
-      agents.register(createClaudeProvider({ settings, token: () => storedToken(secrets) })),
+      agents.register(
+        createClaudeProvider({
+          settings,
+          token: () => storedToken(secrets),
+          listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
+        }),
+      ),
     );
 
     // A new sign-in — the email one done, Claude Code fetched for it, a

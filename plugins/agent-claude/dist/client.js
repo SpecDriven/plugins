@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// src/settings.ts
+// plugins/agent-claude/src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
 
@@ -78,7 +78,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// src/ui/ClaudeSettings.tsx
+// plugins/agent-claude/src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -278,8 +278,8 @@ function DefaultModel({
     await refresh();
   };
   if (models) {
-    const current = info.defaultModel ?? "";
-    const options = current && !models.includes(current) ? [...models, current] : models;
+    const shown = draft || models[0] || "";
+    const options = shown && !models.includes(shown) ? [...models, shown] : models;
     return /* @__PURE__ */ jsxs("label", {
       className: "settings-row",
       children: [
@@ -290,27 +290,29 @@ function DefaultModel({
             /* @__PURE__ */ jsxs("span", {
               className: "settings-row-hint",
               children: [
-                "The model the coding agent pane and the app's other Claude calls start on, from the models Settings → AI agents lists for Claude.",
-                models.length === 0 ? " List some there to choose one here." : "",
-                " Claude Code's default leaves the choice to Claude Code. Applies to sessions started after the change."
+                "The model the coding agent pane and the app's other Claude calls start on, from the models Settings → AI agents lists for Claude, the first until you choose another.",
+                shown ? "" : " List some there to choose one here; until then Claude Code chooses.",
+                " Applies to sessions started after the change."
               ]
             })
           ]
         }),
-        /* @__PURE__ */ jsxs("select", {
+        shown ? /* @__PURE__ */ jsx("select", {
           "aria-label": "Default Claude model",
-          value: draft,
+          value: shown,
           onChange: (e) => void commit(e.target.value),
-          children: [
-            /* @__PURE__ */ jsx("option", {
-              value: "",
-              children: "Claude Code's default"
-            }),
-            options.map((m4) => /* @__PURE__ */ jsx("option", {
-              value: m4,
-              children: m4
-            }, m4))
-          ]
+          children: options.map((m4) => /* @__PURE__ */ jsx("option", {
+            value: m4,
+            children: m4
+          }, m4))
+        }) : /* @__PURE__ */ jsx("select", {
+          "aria-label": "Default Claude model",
+          value: "",
+          disabled: true,
+          children: /* @__PURE__ */ jsx("option", {
+            value: "",
+            children: "No models listed"
+          })
         })
       ]
     });
@@ -772,7 +774,7 @@ function ClaudeProxy({
   });
 }
 
-// src/client.tsx
+// plugins/agent-claude/src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -800,5 +802,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=CFD45FC1341CDFE464756E2164756E21
+//# debugId=928C0BAD3BAF4D7464756E2164756E21
 //# sourceMappingURL=client.js.map
