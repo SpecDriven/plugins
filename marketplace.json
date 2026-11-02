@@ -33,7 +33,7 @@
       "name": "agent-claude",
       "source": "./plugins/agent-claude",
       "description": "Claude Code in the coding agent pane — the chat, its permissions and slash commands — with how it signs in (your Claude account or an API proxy) in Settings",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "category": "agents",
       "api": "1",
       "agent": {

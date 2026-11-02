@@ -712,3 +712,16 @@ test("a Claude plugin switched off takes its routes and its provider away", asyn
   unmount = await mountPlugin();
   expect((await call("GET", "/api/claude/settings")).status).toBe(200);
 });
+
+test("loginStatus names the account from Claude Code's config when auth status does not", async () => {
+  const answer = (stdout: string) => loginStatus(async () => ({ exitCode: 0, stdout, stderr: "" }));
+  const tokenLogin = '{"loggedIn":true,"authMethod":"oauth_token"}';
+  expect(await answer(tokenLogin)).toEqual({ loggedIn: true, method: "oauth_token", email: null });
+
+  await writeFile(join(config, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "ada@example.com" } }));
+  expect(await answer(tokenLogin)).toEqual({ loggedIn: true, method: "oauth_token", email: "ada@example.com" });
+  // What the CLI says wins; an API key or nobody signed in names no account.
+  expect((await answer('{"loggedIn":true,"authMethod":"claude.ai","email":"bo@example.com"}')).email).toBe("bo@example.com");
+  expect((await answer('{"loggedIn":true,"authMethod":"api_key"}')).email).toBeNull();
+  expect((await answer('{"loggedIn":false,"authMethod":"none"}')).email).toBeNull();
+});

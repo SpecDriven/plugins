@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44921,7 +44921,20 @@ async function loginStatus(runner = run) {
   const result = await runner(claude, ["auth", "status", "--json"], { env });
   if (result.exitCode !== 0 && !result.stdout.trim())
     return { loggedIn: false, method: "unknown", email: null };
-  return parseLoginStatus(result.stdout);
+  const status = parseLoginStatus(result.stdout);
+  if (status.loggedIn && !status.email && status.method !== "api_key")
+    status.email = await accountEmail(env);
+  return status;
+}
+async function accountEmail(env = process.env) {
+  const file = env.CLAUDE_CONFIG_DIR ? join2(env.CLAUDE_CONFIG_DIR, ".claude.json") : join2(homedir2(), ".claude.json");
+  try {
+    const parsed = JSON.parse(await readFile(file, "utf8"));
+    const email = parsed?.oauthAccount?.emailAddress;
+    return typeof email === "string" && email ? email : null;
+  } catch {
+    return null;
+  }
 }
 var flow = null;
 var signInListeners = new Set;
@@ -45904,5 +45917,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=EF5FAA78BDF20E1464756E2164756E21
+//# debugId=A4D3330B035AD0B464756E2164756E21
 //# sourceMappingURL=host.js.map

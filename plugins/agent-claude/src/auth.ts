@@ -232,7 +232,25 @@ export async function loginStatus(runner: Runner = run): Promise<LoginStatus> {
   delete env.ANTHROPIC_AUTH_TOKEN;
   const result = await runner(claude, ["auth", "status", "--json"], { env });
   if (result.exitCode !== 0 && !result.stdout.trim()) return { loggedIn: false, method: "unknown", email: null };
-  return parseLoginStatus(result.stdout);
+  const status = parseLoginStatus(result.stdout);
+  // A bearer token in a settings file makes `auth status` answer
+  // "oauth_token" with no account named; the account Claude Code signed in
+  // to is still on record in its global config.
+  if (status.loggedIn && !status.email && status.method !== "api_key") status.email = await accountEmail(env);
+  return status;
+}
+
+/** The email of the claude.ai account in Claude Code's global config —
+    `.claude.json` in CLAUDE_CONFIG_DIR, else in the home folder. */
+export async function accountEmail(env: Env = process.env): Promise<string | null> {
+  const file = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json");
+  try {
+    const parsed = JSON.parse(await readFile(file, "utf8")) as { oauthAccount?: { emailAddress?: unknown } } | null;
+    const email = parsed?.oauthAccount?.emailAddress;
+    return typeof email === "string" && email ? email : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A sign-in started from Settings, as the page polls it. */
