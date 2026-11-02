@@ -184,6 +184,8 @@ export interface QueryLike extends AsyncIterable<SDKMessage> {
   supportedCommands(): Promise<SlashCommand[]>;
   /** Optional: a fake need not answer it. */
   accountInfo?(): Promise<AccountInfoLike | undefined>;
+  /** Optional: the account's model menu (src/accountModels.ts). */
+  supportedModels?(): Promise<unknown[]>;
 }
 
 export type QueryFactory = (args: {

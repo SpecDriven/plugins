@@ -39,6 +39,8 @@ import {
   normalizeDefaultModel,
   type ClaudeSettingsValues,
 } from "../src/settings";
+import { forgetAccountModels } from "../src/accountModels";
+import { setQueryFactory, type QueryFactory, type QueryLike } from "../src/provider";
 import { mountPlugin, quietProfile } from "./app";
 import { integrityOf, packageTarball, servingFetch } from "./registry";
 
@@ -84,6 +86,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await unmount();
   resetLogin();
+  forgetAccountModels();
+  setQueryFactory(null);
   setClaudeAvailability(null);
   setSecretBackend("agent-claude.token", null);
   process.env.PATH = realPath;
@@ -612,6 +616,71 @@ test("the sign-in routes drive the CLI and poll it", async () => {
   expect(cancelled.status).toBe(200);
 });
 
+test("GET /api/claude/models lists the signed-in account's models, asked of Claude Code once per sign-in", async () => {
+  await fakeClaudeOnPath();
+  const asked: Parameters<QueryFactory>[0][] = [];
+  setQueryFactory((args) => {
+    asked.push(args);
+    return {
+      supportedModels: async () => [
+        { value: "default", resolvedModel: "claude-sonnet-4-6", displayName: "Default (recommended)", description: "Use the default model" },
+        { value: "opus", resolvedModel: "claude-opus-4-8", displayName: "Opus", description: "Opus 4.8 · Best for everyday, complex tasks" },
+        { value: "two words", displayName: "Broken", description: "" },
+      ],
+    } as unknown as QueryLike;
+  });
+
+  // Nobody signed in: no models, and Claude Code is not asked.
+  expect((await call("GET", "/api/claude/models")).body).toEqual({ models: [] });
+  expect(asked).toHaveLength(0);
+
+  await call("POST", "/api/claude/login", { email: "ada@example.com" });
+  await settle(() => !loginState()!.inProgress);
+  const listed = await call("GET", "/api/claude/models");
+  expect(listed.status).toBe(200);
+  expect(listed.body.models).toEqual([
+    { value: "default", resolvedModel: "claude-sonnet-4-6", displayName: "Default (recommended)", description: "Use the default model" },
+    { value: "opus", resolvedModel: "claude-opus-4-8", displayName: "Opus", description: "Opus 4.8 · Best for everyday, complex tasks" },
+  ]);
+  // A Claude Code started for nothing else: no prompt, no tools, no session
+  // left behind, signed in as Settings says — and stopped once it answered.
+  expect(asked).toHaveLength(1);
+  const { prompt, options } = asked[0]!;
+  expect(options).toMatchObject({ tools: [], settingSources: [], persistSession: false });
+  expect(options.abortController!.signal.aborted).toBe(true);
+  expect(JSON.parse(String(options.extraArgs!.settings))).toEqual({
+    env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" },
+  });
+  const sent: unknown[] = [];
+  for await (const m of prompt) sent.push(m);
+  expect(sent).toEqual([]);
+
+  await call("GET", "/api/claude/models");
+  expect(asked).toHaveLength(1);
+  // A sign-out forgets them; behind a proxy there are none to ask for.
+  await call("POST", "/api/claude/logout");
+  expect((await call("GET", "/api/claude/models")).body).toEqual({ models: [] });
+  await call("POST", "/api/claude/login", { email: "ada@example.com" });
+  await settle(() => !loginState()!.inProgress);
+  expect((await call("GET", "/api/claude/models")).body.models).toHaveLength(2);
+  expect(asked).toHaveLength(2);
+  await call("PUT", "/api/claude/settings", { claudeAuth: "proxy", claudeProxyUrl: "http://localhost:6655" });
+  expect((await call("GET", "/api/claude/models")).body).toEqual({ models: [] });
+  expect(asked).toHaveLength(2);
+});
+
+test("a Claude Code that does not list its models in time is an error, and the next ask tries again", async () => {
+  await fakeClaudeOnPath();
+  await call("POST", "/api/claude/login", { email: "ada@example.com" });
+  await settle(() => !loginState()!.inProgress);
+  setQueryFactory(() => ({ supportedModels: async () => { throw new Error("Claude Code exited"); } }) as unknown as QueryLike);
+  const failed = await call("GET", "/api/claude/models");
+  expect(failed.status).toBe(502);
+  expect(failed.body).toEqual({ models: [], error: "Claude Code exited" });
+  setQueryFactory(() => ({ supportedModels: async () => [{ value: "opus", displayName: "Opus", description: "" }] }) as unknown as QueryLike);
+  expect((await call("GET", "/api/claude/models")).body.models).toEqual([{ value: "opus", displayName: "Opus", description: "" }]);
+});
+
 // An app from before the registry's `changed` hears nothing; the plugin runs as before there.
 test.if(typeof (agents as { changed?: unknown }).changed === "function")(
   "a sign-in, a sign-out and another mode, proxy or token each tell the app Claude's sign-in changed",
@@ -667,6 +736,7 @@ test("POST /api/claude/login/code hands the CLI the code from the sign-in page",
 test("the demo and the hosted app have no Claude sign-in", async () => {
   process.env.DEMO_MODE = "1";
   expect((await call("GET", "/api/claude/auth")).status).toBe(403);
+  expect((await call("GET", "/api/claude/models")).status).toBe(403);
   expect((await call("POST", "/api/claude/token", { token: "x" })).status).toBe(403);
   expect((await call("PUT", "/api/claude/settings", { claudeAuth: "login" })).status).toBe(403);
   delete process.env.DEMO_MODE;
