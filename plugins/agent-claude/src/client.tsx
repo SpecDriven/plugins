@@ -6,13 +6,13 @@
 
 import { CORE_SETTINGS_ORDER } from "@specdriven/client";
 import type { Context, Plugin, SettingsSectionProps } from "@specdriven/client";
-import { ClaudeSettings } from "./ui/ClaudeSettings";
+import { ClaudeSettings, claudeModelsOf } from "./ui/ClaudeSettings";
 
 /** Where the section sits: after Workflow (900), before Git (1000). */
 export const CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 
-function ClaudeSection(_props: SettingsSectionProps) {
-  return <ClaudeSettings />;
+function ClaudeSection({ settings }: SettingsSectionProps) {
+  return <ClaudeSettings models={claudeModelsOf(settings)} />;
 }
 
 const plugin: Plugin<Context> = {

@@ -112,7 +112,14 @@ var MODE_HINT = {
   login: "Sessions use the Claude account Claude Code is signed in to. A proxy or API key in Claude Code's own settings is set aside for them.",
   proxy: "Sessions send their API calls to the proxy below, with its token. That overrides whatever Claude Code's own settings say."
 };
-function ClaudeSettings() {
+function claudeModelsOf(settings) {
+  const all = settings.agentModels;
+  if (!all || typeof all !== "object" || Array.isArray(all))
+    return null;
+  const list = all.claude;
+  return Array.isArray(list) ? list.filter((m4) => typeof m4 === "string") : [];
+}
+function ClaudeSettings({ models = null } = {}) {
   const [info, setInfo] = useState(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState(null);
@@ -191,6 +198,7 @@ function ClaudeSettings() {
       }),
       /* @__PURE__ */ jsx(DefaultModel, {
         info,
+        models,
         refresh,
         onError: setError
       }),
@@ -252,13 +260,14 @@ function ProxyTimeout({
 }
 function DefaultModel({
   info,
+  models,
   refresh,
   onError
 }) {
   const [draft, setDraft] = useState(info.defaultModel ?? "");
   useEffect(() => setDraft(info.defaultModel ?? ""), [info.defaultModel]);
-  const commit = async () => {
-    const model = draft.trim();
+  const commit = async (value = draft) => {
+    const model = value.trim();
     setDraft(model);
     if (model === (info.defaultModel ?? ""))
       return;
@@ -268,6 +277,44 @@ function DefaultModel({
       setDraft(info.defaultModel ?? "");
     await refresh();
   };
+  if (models) {
+    const current = info.defaultModel ?? "";
+    const options = current && !models.includes(current) ? [...models, current] : models;
+    return /* @__PURE__ */ jsxs("label", {
+      className: "settings-row",
+      children: [
+        /* @__PURE__ */ jsxs("span", {
+          className: "settings-row-label",
+          children: [
+            "Default model",
+            /* @__PURE__ */ jsxs("span", {
+              className: "settings-row-hint",
+              children: [
+                "The model the coding agent pane and the app's other Claude calls start on, from the models Settings → AI agents lists for Claude.",
+                models.length === 0 ? " List some there to choose one here." : "",
+                " Claude Code's default leaves the choice to Claude Code. Applies to sessions started after the change."
+              ]
+            })
+          ]
+        }),
+        /* @__PURE__ */ jsxs("select", {
+          "aria-label": "Default Claude model",
+          value: draft,
+          onChange: (e) => void commit(e.target.value),
+          children: [
+            /* @__PURE__ */ jsx("option", {
+              value: "",
+              children: "Claude Code's default"
+            }),
+            options.map((m4) => /* @__PURE__ */ jsx("option", {
+              value: m4,
+              children: m4
+            }, m4))
+          ]
+        })
+      ]
+    });
+  }
   return /* @__PURE__ */ jsxs("label", {
     className: "settings-row",
     children: [
@@ -727,8 +774,10 @@ function ClaudeProxy({
 
 // src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
-function ClaudeSection(_props) {
-  return /* @__PURE__ */ jsx(ClaudeSettings, {});
+function ClaudeSection({ settings }) {
+  return /* @__PURE__ */ jsx(ClaudeSettings, {
+    models: claudeModelsOf(settings)
+  });
 }
 var plugin = {
   name: "agent-claude",
@@ -751,5 +800,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=1A107FC44E837F6D64756E2164756E21
+//# debugId=CFD45FC1341CDFE464756E2164756E21
 //# sourceMappingURL=client.js.map

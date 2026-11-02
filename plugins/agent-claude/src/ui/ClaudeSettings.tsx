@@ -88,8 +88,20 @@ const MODE_HINT: Record<ClaudeAuthMode, string> = {
     "Sessions send their API calls to the proxy below, with its token. That overrides whatever Claude Code's own settings say.",
 };
 
+/**
+ * The models the data repo lists for Claude (Settings → AI agents, the app's
+ * `.specdriven/agent-models.json`), from the state payload; null from an app
+ * that keeps no lists, where the default model stays a free field.
+ */
+export function claudeModelsOf(settings: Record<string, unknown>): string[] | null {
+  const all = settings.agentModels;
+  if (!all || typeof all !== "object" || Array.isArray(all)) return null;
+  const list = (all as Record<string, unknown>).claude;
+  return Array.isArray(list) ? list.filter((m): m is string => typeof m === "string") : [];
+}
+
 /** The section's body: the mode, then the account or the proxy with its timeout. */
-export function ClaudeSettings() {
+export function ClaudeSettings({ models = null }: { models?: string[] | null } = {}) {
   const [info, setInfo] = useState<ClaudeAuthInfo | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +145,7 @@ export function ClaudeSettings() {
         <ClaudeProxy info={info} refresh={refresh} onError={setError} />
       )}
       {info.mode === "proxy" && <ProxyTimeout info={info} refresh={refresh} onError={setError} />}
-      <DefaultModel info={info} refresh={refresh} onError={setError} />
+      <DefaultModel info={info} models={models} refresh={refresh} onError={setError} />
       {error && <p className="error">{error}</p>}
     </div>
   );
@@ -192,21 +204,26 @@ function ProxyTimeout({
 /**
  * The model a new Claude starts on (specs/agents/claude.feature.md "Choose
  * the model Claude starts on"): an alias or a full model id, empty for
- * Claude Code's own default.
+ * Claude Code's own default. Where the app lists Claude's models
+ * (specs/agents/agent-plugins.feature.md "Each agent offers the models the
+ * data repo lists"), a dropdown of them; a default the list no longer holds
+ * stays on offer, so opening the menu never changes it.
  */
-function DefaultModel({
+export function DefaultModel({
   info,
+  models,
   refresh,
   onError,
 }: {
   info: ClaudeAuthInfo;
+  models: string[] | null;
   refresh: () => Promise<void>;
   onError: (error: string | null) => void;
 }) {
   const [draft, setDraft] = useState(info.defaultModel ?? "");
   useEffect(() => setDraft(info.defaultModel ?? ""), [info.defaultModel]);
-  const commit = async () => {
-    const model = draft.trim();
+  const commit = async (value = draft) => {
+    const model = value.trim();
     setDraft(model);
     if (model === (info.defaultModel ?? "")) return;
     const failed = await patchClaudeSettings({ defaultModel: model || null });
@@ -214,6 +231,31 @@ function DefaultModel({
     if (failed) setDraft(info.defaultModel ?? "");
     await refresh();
   };
+  if (models) {
+    const current = info.defaultModel ?? "";
+    const options = current && !models.includes(current) ? [...models, current] : models;
+    return (
+      <label className="settings-row">
+        <span className="settings-row-label">
+          Default model
+          <span className="settings-row-hint">
+            The model the coding agent pane and the app's other Claude calls start on, from the
+            models Settings → AI agents lists for Claude.
+            {models.length === 0 ? " List some there to choose one here." : ""} Claude Code's default
+            leaves the choice to Claude Code. Applies to sessions started after the change.
+          </span>
+        </span>
+        <select aria-label="Default Claude model" value={draft} onChange={(e) => void commit(e.target.value)}>
+          <option value="">Claude Code's default</option>
+          {options.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
   return (
     <label className="settings-row">
       <span className="settings-row-label">
