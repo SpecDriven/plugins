@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// src/host.ts
+// plugins/agent-claude/src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44568,20 +44568,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// src/auth.ts
+// plugins/agent-claude/src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// src/binary.ts
+// plugins/agent-claude/src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// src/binaries.json
+// plugins/agent-claude/src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44596,7 +44596,7 @@ var binaries_default = {
   }
 };
 
-// src/binary.ts
+// plugins/agent-claude/src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44724,7 +44724,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// src/cli.ts
+// plugins/agent-claude/src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44736,7 +44736,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// src/settings.ts
+// plugins/agent-claude/src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44830,7 +44830,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// src/auth.ts
+// plugins/agent-claude/src/auth.ts
 class ClaudeAuthError extends Error {
   status;
   constructor(message, status) {
@@ -45169,7 +45169,25 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// src/provider.ts
+// plugins/agent-claude/src/models.ts
+import { readFile as readFile2 } from "node:fs/promises";
+import { join as join3 } from "node:path";
+var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
+async function listedClaudeModels(dataDir) {
+  if (!dataDir)
+    return [];
+  try {
+    const file = JSON.parse(await readFile2(join3(dataDir, AGENT_MODELS_FILE), "utf8"));
+    const list = file?.claude;
+    if (!Array.isArray(list))
+      return [];
+    return list.map(normalizeDefaultModel).filter((m2) => m2 !== null);
+  } catch {
+    return [];
+  }
+}
+
+// plugins/agent-claude/src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45667,6 +45685,8 @@ function createClaudeProvider(options = {}) {
   const factory = () => options.query ?? currentQueryFactory();
   const settings = options.settings ?? (async () => DEFAULT_SETTINGS);
   const token = options.token ?? (async () => null);
+  const listedModels = options.listedModels ?? (async () => []);
+  const defaultModel = async (own) => own.defaultModel ?? (await listedModels())[0] ?? null;
   const firstResponseSeconds = async () => firstResponseReader ? firstResponseReader() : (await settings()).firstResponseSeconds;
   return {
     id: "claude",
@@ -45695,7 +45715,7 @@ function createClaudeProvider(options = {}) {
         const own = await settings();
         const launch = await claudeLaunch(own, opts.cwd, await token());
         const firstResponseMs = Math.max(0, Math.floor(await firstResponseSeconds() * 1000));
-        const runModel = model ?? own.defaultModel;
+        const runModel = model ?? await defaultModel(own);
         const sdkOptions = {
           cwd: opts.cwd,
           pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
@@ -45741,7 +45761,7 @@ function createClaudeProvider(options = {}) {
       prompt.close();
       const own = await settings();
       const launch = await claudeLaunch(own, req.cwd, await token());
-      const model = req.model ?? own.defaultModel;
+      const model = req.model ?? await defaultModel(own);
       const timer = setTimeout(() => abortController.abort(), req.timeoutMs);
       try {
         const query = await factory()({
@@ -45780,7 +45800,7 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// src/host.ts
+// plugins/agent-claude/src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -45831,7 +45851,11 @@ var plugin = {
     const data = ctx.need("data");
     const secrets = config.secrets(TOKEN_STORE);
     const settings = async () => claudeSettingsOf(await config.settings.read());
-    ctx.effect(() => agents2.register(createClaudeProvider({ settings, token: () => storedToken(secrets) })));
+    ctx.effect(() => agents2.register(createClaudeProvider({
+      settings,
+      token: () => storedToken(secrets),
+      listedModels: async () => listedClaudeModels(await data.dir().catch(() => null))
+    })));
     const signInChanged2 = () => agents2.changed?.("claude");
     ctx.effect(() => onSignInChange(signInChanged2));
     try {
@@ -45946,5 +45970,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=41ADCF0A9011330764756E2164756E21
+//# debugId=7A78662871EC9E5664756E2164756E21
 //# sourceMappingURL=host.js.map

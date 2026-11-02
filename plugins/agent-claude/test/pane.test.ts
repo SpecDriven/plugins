@@ -27,6 +27,7 @@ import {
 } from "../src/provider";
 import type { AccountInfoLike, QueryLike } from "../src/provider";
 import { setClaudeAvailability } from "../src/cli";
+import { AGENT_MODELS_FILE } from "../src/models";
 import { mountPlugin, quietProfile } from "./app";
 
 /** The proxy token's store, as HostConfig.secrets("token") names it for this plugin. */
@@ -1039,9 +1040,16 @@ test("the first-response wait is a setting, 15 seconds unless changed", async ()
   expect(bad.status).toBe(400);
 });
 
-test("a new session starts on the default model Settings names, else Claude Code's own", async () => {
+test("a new session starts on the default model Settings names, else the first listed, else Claude Code's own", async () => {
   expect((await api("/api/agent/chat", "POST", { name: "plain" })).status).toBe(200);
   expect("model" in fakes.at(-1)!.options).toBe(false);
+
+  // Settings → AI agents lists Claude's models in the data repo: the first,
+  // the one Settings → Claude shows chosen.
+  await mkdir(join(data, ".specdriven"), { recursive: true });
+  await writeFile(join(data, AGENT_MODELS_FILE), JSON.stringify({ claude: ["claude-sonnet-4-6", "opus"] }));
+  expect((await api("/api/agent/chat", "POST", { name: "listed" })).status).toBe(200);
+  expect(fakes.at(-1)!.options.model).toBe("claude-sonnet-4-6");
 
   await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "sonnet" } }, ...quietProfile(data) }, root);
   expect((await api("/api/agent/chat", "POST", { name: "sonnet" })).status).toBe(200);

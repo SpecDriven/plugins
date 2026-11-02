@@ -733,6 +733,8 @@ export interface ClaudeProviderOptions {
   settings?: () => Promise<ClaudeSettingsValues>;
   /** The proxy token the plugin's secret store holds; default: none. */
   token?: () => Promise<string | null>;
+  /** The models the data repo lists for Claude (src/models.ts); default: none. */
+  listedModels?: () => Promise<string[]>;
 }
 
 /** The Claude provider; the host half hands it the plugin's settings and token. */
@@ -740,6 +742,10 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
   const factory = () => options.query ?? currentQueryFactory();
   const settings = options.settings ?? (async () => DEFAULT_SETTINGS);
   const token = options.token ?? (async () => null);
+  const listedModels = options.listedModels ?? (async () => []);
+  /** No model asked for: the default Settings names, else the first the
+      data repo lists for Claude, else none — Claude Code's own. */
+  const defaultModel = async (own: ClaudeSettingsValues) => own.defaultModel ?? (await listedModels())[0] ?? null;
   const firstResponseSeconds = async () =>
     firstResponseReader ? firstResponseReader() : (await settings()).firstResponseSeconds;
   return {
@@ -774,8 +780,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
         const firstResponseMs = Math.max(0, Math.floor((await firstResponseSeconds()) * 1000));
         // A carried-on conversation keeps the model it ran on, whatever the
         // default says now; a new one starts on the default Settings names,
-        // else Claude Code's own.
-        const runModel = model ?? own.defaultModel;
+        // else the first listed model, else Claude Code's own.
+        const runModel = model ?? (await defaultModel(own));
         const sdkOptions: Options = {
           cwd: opts.cwd,
           pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
@@ -825,8 +831,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
       const own = await settings();
       const launch = await claudeLaunch(own, req.cwd, await token());
       // A model the caller asks for, else the default Settings names, else
-      // Claude Code's own.
-      const model = req.model ?? own.defaultModel;
+      // the first listed model, else Claude Code's own.
+      const model = req.model ?? (await defaultModel(own));
       const timer = setTimeout(() => abortController.abort(), req.timeoutMs);
       try {
         const query = await factory()({

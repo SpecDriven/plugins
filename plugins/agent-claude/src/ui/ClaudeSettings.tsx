@@ -206,8 +206,10 @@ function ProxyTimeout({
  * the model Claude starts on"): an alias or a full model id, empty for
  * Claude Code's own default. Where the app lists Claude's models
  * (specs/agents/agent-plugins.feature.md "Each agent offers the models the
- * data repo lists"), a dropdown of them; a default the list no longer holds
- * stays on offer, so opening the menu never changes it.
+ * data repo lists"), a dropdown of them and nothing else, the first chosen
+ * until another is — the one a new Claude starts on (src/models.ts); a
+ * default the list no longer holds stays on offer, so opening the menu
+ * never changes it.
  */
 export function DefaultModel({
   info,
@@ -232,27 +234,32 @@ export function DefaultModel({
     await refresh();
   };
   if (models) {
-    const current = info.defaultModel ?? "";
-    const options = current && !models.includes(current) ? [...models, current] : models;
+    const shown = draft || models[0] || "";
+    const options = shown && !models.includes(shown) ? [...models, shown] : models;
     return (
       <label className="settings-row">
         <span className="settings-row-label">
           Default model
           <span className="settings-row-hint">
             The model the coding agent pane and the app's other Claude calls start on, from the
-            models Settings → AI agents lists for Claude.
-            {models.length === 0 ? " List some there to choose one here." : ""} Claude Code's default
-            leaves the choice to Claude Code. Applies to sessions started after the change.
+            models Settings → AI agents lists for Claude, the first until you choose another.
+            {shown ? "" : " List some there to choose one here; until then Claude Code chooses."} Applies to
+            sessions started after the change.
           </span>
         </span>
-        <select aria-label="Default Claude model" value={draft} onChange={(e) => void commit(e.target.value)}>
-          <option value="">Claude Code's default</option>
-          {options.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
+        {shown ? (
+          <select aria-label="Default Claude model" value={shown} onChange={(e) => void commit(e.target.value)}>
+            {options.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <select aria-label="Default Claude model" value="" disabled>
+            <option value="">No models listed</option>
+          </select>
+        )}
       </label>
     );
   }
