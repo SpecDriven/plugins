@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// plugins/agent-claude/src/host.ts
+// src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44568,20 +44568,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// plugins/agent-claude/src/auth.ts
+// src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// plugins/agent-claude/src/binary.ts
+// src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// plugins/agent-claude/src/binaries.json
+// src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44596,7 +44596,7 @@ var binaries_default = {
   }
 };
 
-// plugins/agent-claude/src/binary.ts
+// src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44724,7 +44724,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// plugins/agent-claude/src/cli.ts
+// src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44736,7 +44736,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44830,7 +44830,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// plugins/agent-claude/src/auth.ts
+// src/auth.ts
 class ClaudeAuthError extends Error {
   status;
   constructor(message, status) {
@@ -45169,25 +45169,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// plugins/agent-claude/src/models.ts
-import { readFile as readFile2 } from "node:fs/promises";
-import { join as join3 } from "node:path";
-var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
-async function listedClaudeModels(dataDir) {
-  if (!dataDir)
-    return [];
-  try {
-    const file = JSON.parse(await readFile2(join3(dataDir, AGENT_MODELS_FILE), "utf8"));
-    const list = file?.claude;
-    if (!Array.isArray(list))
-      return [];
-    return list.map(normalizeDefaultModel).filter((m2) => m2 !== null);
-  } catch {
-    return [];
-  }
-}
-
-// plugins/agent-claude/src/provider.ts
+// src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45800,7 +45782,100 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// plugins/agent-claude/src/host.ts
+// src/accountModels.ts
+var ACCOUNT_MODELS_TIMEOUT_MS = 20000;
+var ACCOUNT_MODELS_TTL_MS = 10 * 60000;
+function accountModelsOf(rows) {
+  if (!Array.isArray(rows))
+    return [];
+  const models = [];
+  for (const row of rows) {
+    const value = normalizeDefaultModel(row?.value);
+    if (!value || models.some((m2) => m2.value === value))
+      continue;
+    const resolved = normalizeDefaultModel(row.resolvedModel);
+    models.push({
+      value,
+      ...resolved ? { resolvedModel: resolved } : {},
+      displayName: typeof row.displayName === "string" && row.displayName ? row.displayName : value,
+      description: typeof row.description === "string" ? row.description : ""
+    });
+  }
+  return models;
+}
+async function fetchAccountModels(own, cwd, token, factory = currentQueryFactory(), timeoutMs = ACCOUNT_MODELS_TIMEOUT_MS) {
+  const launch = await claudeLaunch(own, cwd, token);
+  const abortController = new AbortController;
+  const prompt = new InputQueue;
+  let timer;
+  try {
+    const query = await factory({
+      prompt,
+      options: {
+        cwd,
+        pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
+        tools: [],
+        settingSources: [],
+        persistSession: false,
+        abortController,
+        env: launch.env,
+        ...Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}
+      }
+    });
+    if (!query.supportedModels)
+      return [];
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Claude Code did not list its models in time")), timeoutMs);
+    });
+    return accountModelsOf(await Promise.race([query.supportedModels(), timeout]));
+  } finally {
+    clearTimeout(timer);
+    prompt.close();
+    abortController.abort();
+  }
+}
+var cached = null;
+var pending2 = null;
+async function accountModels(ask, now = Date.now()) {
+  if (cached && now - cached.at < ACCOUNT_MODELS_TTL_MS)
+    return cached.models;
+  if (!pending2) {
+    const asking = ask().then((models) => {
+      if (pending2 === asking)
+        cached = { models, at: Date.now() };
+      return models;
+    }).finally(() => {
+      if (pending2 === asking)
+        pending2 = null;
+    });
+    pending2 = asking;
+  }
+  return pending2;
+}
+function forgetAccountModels() {
+  cached = null;
+  pending2 = null;
+}
+
+// src/models.ts
+import { readFile as readFile3 } from "node:fs/promises";
+import { join as join7 } from "node:path";
+var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
+async function listedClaudeModels(dataDir) {
+  if (!dataDir)
+    return [];
+  try {
+    const file = JSON.parse(await readFile3(join7(dataDir, AGENT_MODELS_FILE), "utf8"));
+    const list = file?.claude;
+    if (!Array.isArray(list))
+      return [];
+    return list.map(normalizeDefaultModel).filter((m2) => m2 !== null);
+  } catch {
+    return [];
+  }
+}
+
+// src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -45856,7 +45931,10 @@ var plugin = {
       token: () => storedToken(secrets),
       listedModels: async () => listedClaudeModels(await data.dir().catch(() => null))
     })));
-    const signInChanged2 = () => agents2.changed?.("claude");
+    const signInChanged2 = () => {
+      forgetAccountModels();
+      agents2.changed?.("claude");
+    };
     ctx.effect(() => onSignInChange(signInChanged2));
     try {
       await config.settings.adopt(CLAUDE_LEGACY_KEYS);
@@ -45938,6 +46016,19 @@ var plugin = {
       }
       return answer();
     };
+    const getModels = async () => {
+      const own = await settings();
+      const cwd = await claudeCwd();
+      const token = await storedToken(secrets);
+      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login")
+        return json({ models: [] });
+      try {
+        const models = await accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : []);
+        return json({ models });
+      } catch (e) {
+        return json({ models: [], error: e.message }, 502);
+      }
+    };
     const getSettings = async () => json(await settings());
     const putSettings = async (req) => {
       const parsed = claudeSettingsPatch(await req.json().catch(() => null));
@@ -45959,6 +46050,7 @@ var plugin = {
     add("POST", "/api/claude/login/code", postLoginCode);
     add("DELETE", "/api/claude/login", deleteLogin);
     add("POST", "/api/claude/logout", postLogout);
+    add("GET", "/api/claude/models", getModels);
     add("GET", "/api/claude/settings", getSettings);
     add("PUT", "/api/claude/settings", putSettings);
   }
@@ -45970,5 +46062,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=7A78662871EC9E5664756E2164756E21
+//# debugId=81A415B192898FA464756E2164756E21
 //# sourceMappingURL=host.js.map

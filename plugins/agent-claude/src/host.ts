@@ -3,7 +3,8 @@
 // the app's agent registry (src/provider.ts), and the routes for how Claude
 // signs in — the mode, what Claude Code's own settings say of a proxy, the
 // login driven from Settings, a check of the proxy, and the plugin's own
-// settings — among them the model a new Claude starts on. The proxy token lives in the plugin's secret store and never
+// settings — among them the model a new Claude starts on, from the models
+// the signed-in account offers (src/accountModels.ts). The proxy token lives in the plugin's secret store and never
 // leaves the host; the page learns only whether there is one. A local
 // Claude only, so every route refuses in the hosted app and the demo.
 
@@ -24,6 +25,7 @@ import {
   submitLoginCode,
 } from "./auth";
 import type { EffectiveClaudeAuth, LoginStatus } from "./auth";
+import { accountModels, fetchAccountModels, forgetAccountModels } from "./accountModels";
 import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
 import { listedClaudeModels } from "./models";
@@ -113,7 +115,11 @@ const plugin: Plugin<Context, HostConfig> = {
     // the old one stale: the pane's "not set up", a live session's account
     // and credentials. The app re-reads the one and refreshes the other
     // (AgentSession.refresh); an app from before `changed` restarts instead.
-    const signInChanged = () => (agents as { changed?(id: string): void }).changed?.("claude");
+    // The account's models go with the old sign-in too.
+    const signInChanged = () => {
+      forgetAccountModels();
+      (agents as { changed?(id: string): void }).changed?.("claude");
+    };
     ctx.effect(() => onSignInChange(signInChanged));
 
     // The values that lived at the top of settings.json while Claude was
@@ -215,6 +221,23 @@ const plugin: Plugin<Context, HostConfig> = {
       return answer();
     };
 
+    // The models the Claude account offers, for Settings → Claude's
+    // "Default model"; none behind a proxy or with no one signed in.
+    const getModels: Handler = async () => {
+      const own = await settings();
+      const cwd = await claudeCwd();
+      const token = await storedToken(secrets);
+      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login") return json({ models: [] });
+      try {
+        const models = await accountModels(async () =>
+          (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : [],
+        );
+        return json({ models });
+      } catch (e) {
+        return json({ models: [], error: (e as Error).message }, 502);
+      }
+    };
+
     const getSettings: Handler = async () => json(await settings());
 
     const putSettings: Handler = async (req) => {
@@ -237,6 +260,7 @@ const plugin: Plugin<Context, HostConfig> = {
     add("POST", "/api/claude/login/code", postLoginCode);
     add("DELETE", "/api/claude/login", deleteLogin);
     add("POST", "/api/claude/logout", postLogout);
+    add("GET", "/api/claude/models", getModels);
     add("GET", "/api/claude/settings", getSettings);
     add("PUT", "/api/claude/settings", putSettings);
   },

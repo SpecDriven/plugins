@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { AccountModel } from "../accountModels";
 import { CLAUDE_MODEL_ALIASES, DEFAULT_AGENT_FIRST_RESPONSE_SECONDS, type ClaudeAuthMode } from "../settings";
 
 // Settings → Claude (specs/agents/claude.feature.md "Choose how Claude signs
@@ -66,6 +67,12 @@ export async function fetchClaudeAuth(): Promise<ClaudeAuthInfo | null> {
   }
 }
 
+/** The models the signed-in Claude account offers; null when it could not say. */
+export async function fetchAccountModels(): Promise<AccountModel[] | null> {
+  const result = await call<{ models: AccountModel[] }>("GET", "/api/claude/models");
+  return result.ok && result.data.models.length > 0 ? result.data.models : null;
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
   try {
     const res = await fetch(path, {
@@ -105,6 +112,22 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
   const [info, setInfo] = useState<ClaudeAuthInfo | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [account, setAccount] = useState<AccountModel[] | null>(null);
+
+  // Signed in with a Claude account: the models it offers, asked afresh
+  // whenever the account changes.
+  const accountKey = info?.mode === "login" && info.login.loggedIn ? (info.login.email ?? "") : null;
+  useEffect(() => {
+    setAccount(null);
+    if (accountKey === null) return;
+    let live = true;
+    void fetchAccountModels().then((models) => {
+      if (live) setAccount(models);
+    });
+    return () => {
+      live = false;
+    };
+  }, [accountKey]);
 
   const refresh = async () => {
     const next = await fetchClaudeAuth();
@@ -145,7 +168,13 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
         <ClaudeProxy info={info} refresh={refresh} onError={setError} />
       )}
       {info.mode === "proxy" && <ProxyTimeout info={info} refresh={refresh} onError={setError} />}
-      <DefaultModel info={info} models={models} refresh={refresh} onError={setError} />
+      <DefaultModel
+        info={info}
+        models={models}
+        account={accountKey === null ? null : account}
+        refresh={refresh}
+        onError={setError}
+      />
       {error && <p className="error">{error}</p>}
     </div>
   );
@@ -207,18 +236,23 @@ function ProxyTimeout({
  * Claude Code's own default. Where the app lists Claude's models
  * (specs/agents/agent-plugins.feature.md "Each agent offers the models the
  * data repo lists"), a dropdown of them and nothing else, the first chosen
- * until another is — the one a new Claude starts on (src/models.ts); a
- * default the list no longer holds stays on offer, so opening the menu
- * never changes it.
+ * until another is — the one a new Claude starts on (src/models.ts). Signed
+ * in with a Claude account, a dropdown of every model the account offers
+ * (src/accountModels.ts) instead, still showing the one a new Claude starts
+ * on. Either way a default the list does not hold stays on offer, so
+ * opening the menu never changes it.
  */
 export function DefaultModel({
   info,
   models,
+  account = null,
   refresh,
   onError,
 }: {
   info: ClaudeAuthInfo;
   models: string[] | null;
+  /** The signed-in account's models; null when not signed in or not known. */
+  account?: AccountModel[] | null;
   refresh: () => Promise<void>;
   onError: (error: string | null) => void;
 }) {
@@ -233,6 +267,32 @@ export function DefaultModel({
     if (failed) setDraft(info.defaultModel ?? "");
     await refresh();
   };
+  if (account && account.length > 0) {
+    // What a new Claude starts on: the chosen one, else the first listed,
+    // else Claude Code's own — the account's first row.
+    const shown = draft || models?.[0] || account[0]!.value;
+    const options = account.some((m) => m.value === shown)
+      ? account
+      : [...account, { value: shown, displayName: shown, description: "" }];
+    return (
+      <label className="settings-row">
+        <span className="settings-row-label">
+          Default model
+          <span className="settings-row-hint">
+            The model the coding agent pane and the app's other Claude calls start on, from the
+            models your Claude account offers. Applies to sessions started after the change.
+          </span>
+        </span>
+        <select aria-label="Default Claude model" value={shown} onChange={(e) => void commit(e.target.value)}>
+          {options.map((m) => (
+            <option key={m.value} value={m.value} title={m.description || undefined}>
+              {accountModelLabel(m, account)}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
   if (models) {
     const shown = draft || models[0] || "";
     const options = shown && !models.includes(shown) ? [...models, shown] : models;
@@ -293,6 +353,18 @@ export function DefaultModel({
       </datalist>
     </label>
   );
+}
+
+/**
+ * An account model as the menu shows it: the model it is now — the first
+ * part of Claude Code's description, such as "Opus 4.8" — and the value
+ * that is saved. A value the account does not list is named after the row
+ * it resolves to, if any.
+ */
+export function accountModelLabel(model: AccountModel, account: AccountModel[]): string {
+  const row = (!model.description && account.find((m) => m.resolvedModel === model.value)) || model;
+  const name = row.description.split(" · ")[0]?.trim() || row.displayName;
+  return name && name !== model.value ? `${name} — ${model.value}` : model.value;
 }
 
 /** The Claude account: who is signed in, the email sign-in, sign out. */

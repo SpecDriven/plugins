@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
 
@@ -78,7 +78,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// plugins/agent-claude/src/ui/ClaudeSettings.tsx
+// src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -92,6 +92,10 @@ async function fetchClaudeAuth() {
   } catch {
     return null;
   }
+}
+async function fetchAccountModels() {
+  const result = await call("GET", "/api/claude/models");
+  return result.ok && result.data.models.length > 0 ? result.data.models : null;
 }
 async function call(method, path, body) {
   try {
@@ -123,6 +127,21 @@ function ClaudeSettings({ models = null } = {}) {
   const [info, setInfo] = useState(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState(null);
+  const [account, setAccount] = useState(null);
+  const accountKey = info?.mode === "login" && info.login.loggedIn ? info.login.email ?? "" : null;
+  useEffect(() => {
+    setAccount(null);
+    if (accountKey === null)
+      return;
+    let live = true;
+    fetchAccountModels().then((models2) => {
+      if (live)
+        setAccount(models2);
+    });
+    return () => {
+      live = false;
+    };
+  }, [accountKey]);
   const refresh = async () => {
     const next = await fetchClaudeAuth();
     setFailed(next === null);
@@ -199,6 +218,7 @@ function ClaudeSettings({ models = null } = {}) {
       /* @__PURE__ */ jsx(DefaultModel, {
         info,
         models,
+        account: accountKey === null ? null : account,
         refresh,
         onError: setError
       }),
@@ -261,6 +281,7 @@ function ProxyTimeout({
 function DefaultModel({
   info,
   models,
+  account = null,
   refresh,
   onError
 }) {
@@ -277,6 +298,35 @@ function DefaultModel({
       setDraft(info.defaultModel ?? "");
     await refresh();
   };
+  if (account && account.length > 0) {
+    const shown = draft || models?.[0] || account[0].value;
+    const options = account.some((m4) => m4.value === shown) ? account : [...account, { value: shown, displayName: shown, description: "" }];
+    return /* @__PURE__ */ jsxs("label", {
+      className: "settings-row",
+      children: [
+        /* @__PURE__ */ jsxs("span", {
+          className: "settings-row-label",
+          children: [
+            "Default model",
+            /* @__PURE__ */ jsx("span", {
+              className: "settings-row-hint",
+              children: "The model the coding agent pane and the app's other Claude calls start on, from the models your Claude account offers. Applies to sessions started after the change."
+            })
+          ]
+        }),
+        /* @__PURE__ */ jsx("select", {
+          "aria-label": "Default Claude model",
+          value: shown,
+          onChange: (e) => void commit(e.target.value),
+          children: options.map((m4) => /* @__PURE__ */ jsx("option", {
+            value: m4.value,
+            title: m4.description || undefined,
+            children: accountModelLabel(m4, account)
+          }, m4.value))
+        })
+      ]
+    });
+  }
   if (models) {
     const shown = draft || models[0] || "";
     const options = shown && !models.includes(shown) ? [...models, shown] : models;
@@ -362,6 +412,11 @@ function DefaultModel({
       })
     ]
   });
+}
+function accountModelLabel(model, account) {
+  const row = !model.description && account.find((m4) => m4.resolvedModel === model.value) || model;
+  const name = row.description.split(" · ")[0]?.trim() || row.displayName;
+  return name && name !== model.value ? `${name} — ${model.value}` : model.value;
 }
 function ClaudeAccount({
   info,
@@ -774,7 +829,7 @@ function ClaudeProxy({
   });
 }
 
-// plugins/agent-claude/src/client.tsx
+// src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -802,5 +857,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=928C0BAD3BAF4D7464756E2164756E21
+//# debugId=055C4FBE3777792764756E2164756E21
 //# sourceMappingURL=client.js.map
