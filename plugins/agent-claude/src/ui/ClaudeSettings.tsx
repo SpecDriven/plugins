@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_AGENT_FIRST_RESPONSE_SECONDS, type ClaudeAuthMode } from "../settings";
+import { CLAUDE_MODEL_ALIASES, DEFAULT_AGENT_FIRST_RESPONSE_SECONDS, type ClaudeAuthMode } from "../settings";
 
 // Settings → Claude (specs/agents/claude.feature.md "Choose how Claude signs
 // in", "API proxy settings are filled in from Claude Code's settings", "Sign
 // in to Claude with an email", "Sign in to Claude without Claude Code
-// installed"): how every Claude the app starts signs in — the Claude account
-// Claude Code is signed in to, or an API proxy with a token
-// kept on this device. The host half (src/auth.ts, src/host.ts) never sends
+// installed", "Choose the model Claude starts on"): how every Claude the app
+// starts signs in — the Claude account Claude Code is signed in to, or an API
+// proxy with a token kept on this device — and the model it starts on. The host half (src/auth.ts, src/host.ts) never sends
 // a token back; the page learns only whether there is one. What
 // the section changes goes through the plugin's own route
 // (PUT /api/claude/settings), into its section of the settings file.
@@ -40,6 +40,8 @@ export interface ClaudeAuthInfo {
   };
   /** The pane's first-response wait behind the proxy; 0 is no limit. */
   firstResponseSeconds: number;
+  /** The model a new Claude starts on; null is Claude Code's own default. */
+  defaultModel: string | null;
   signIn: ClaudeSignIn | null;
 }
 
@@ -48,6 +50,7 @@ async function patchClaudeSettings(patch: {
   claudeAuth?: ClaudeAuthMode | null;
   claudeProxyUrl?: string | null;
   firstResponseSeconds?: number;
+  defaultModel?: string | null;
 }): Promise<string | null> {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -130,6 +133,7 @@ export function ClaudeSettings() {
         <ClaudeProxy info={info} refresh={refresh} onError={setError} />
       )}
       {info.mode === "proxy" && <ProxyTimeout info={info} refresh={refresh} onError={setError} />}
+      <DefaultModel info={info} refresh={refresh} onError={setError} />
       {error && <p className="error">{error}</p>}
     </div>
   );
@@ -181,6 +185,63 @@ function ProxyTimeout({
           if (e.key === "Enter") e.currentTarget.blur();
         }}
       />
+    </label>
+  );
+}
+
+/**
+ * The model a new Claude starts on (specs/agents/claude.feature.md "Choose
+ * the model Claude starts on"): an alias or a full model id, empty for
+ * Claude Code's own default.
+ */
+function DefaultModel({
+  info,
+  refresh,
+  onError,
+}: {
+  info: ClaudeAuthInfo;
+  refresh: () => Promise<void>;
+  onError: (error: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(info.defaultModel ?? "");
+  useEffect(() => setDraft(info.defaultModel ?? ""), [info.defaultModel]);
+  const commit = async () => {
+    const model = draft.trim();
+    setDraft(model);
+    if (model === (info.defaultModel ?? "")) return;
+    const failed = await patchClaudeSettings({ defaultModel: model || null });
+    onError(failed);
+    if (failed) setDraft(info.defaultModel ?? "");
+    await refresh();
+  };
+  return (
+    <label className="settings-row">
+      <span className="settings-row-label">
+        Default model
+        <span className="settings-row-hint">
+          The model the coding agent pane and the app's other Claude calls start on — an alias
+          such as <code>opus</code> or <code>sonnet</code>, or a full model id. Empty uses Claude
+          Code's own default. Applies to sessions started after the change.
+        </span>
+      </span>
+      <input
+        aria-label="Default Claude model"
+        list="claude-model-aliases"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        placeholder="Claude Code's default"
+        autoComplete="off"
+        spellCheck={false}
+      />
+      <datalist id="claude-model-aliases">
+        {CLAUDE_MODEL_ALIASES.map((alias) => (
+          <option key={alias} value={alias} />
+        ))}
+      </datalist>
     </label>
   );
 }

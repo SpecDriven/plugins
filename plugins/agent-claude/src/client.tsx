@@ -24,7 +24,7 @@ const plugin: Plugin<Context> = {
       settings.add({
         id: "claude",
         title: "Claude",
-        hint: "How the Claude the app starts signs in: your Claude account, or an API proxy with a token kept on this device.",
+        hint: "How the Claude the app starts signs in — your Claude account, or an API proxy with a token kept on this device — and the model it starts on.",
         order: CLAUDE_SETTINGS_ORDER,
         when: ({ demo, hosted }) => !demo && !hosted,
         Component: ClaudeSection,

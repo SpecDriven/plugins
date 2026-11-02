@@ -44744,8 +44744,10 @@ var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var DEFAULT_SETTINGS = {
   claudeAuth: null,
   claudeProxyUrl: null,
-  firstResponseSeconds: DEFAULT_AGENT_FIRST_RESPONSE_SECONDS
+  firstResponseSeconds: DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
+  defaultModel: null
 };
+var MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,199}$/;
 function normalizeClaudeAuth(value) {
   return CLAUDE_AUTH_MODES.includes(value) ? value : null;
 }
@@ -44768,11 +44770,18 @@ function normalizeAgentFirstResponseSeconds(value) {
     return DEFAULT_AGENT_FIRST_RESPONSE_SECONDS;
   return Math.floor(n);
 }
+function normalizeDefaultModel(value) {
+  if (typeof value !== "string")
+    return null;
+  const model = value.trim();
+  return MODEL_ID.test(model) ? model : null;
+}
 function claudeSettingsOf(section) {
   return {
     claudeAuth: normalizeClaudeAuth(section.claudeAuth),
     claudeProxyUrl: normalizeClaudeProxyUrl(section.claudeProxyUrl),
-    firstResponseSeconds: normalizeAgentFirstResponseSeconds(section.agentFirstResponseSeconds)
+    firstResponseSeconds: normalizeAgentFirstResponseSeconds(section.agentFirstResponseSeconds),
+    defaultModel: normalizeDefaultModel(section.defaultModel)
   };
 }
 function claudeSettingsPatch(body) {
@@ -44806,8 +44815,18 @@ function claudeSettingsPatch(body) {
     }
     patch.agentFirstResponseSeconds = Math.floor(n) === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS ? null : Math.floor(n);
   }
-  if (Object.keys(patch).length === 0)
-    return { error: "claudeAuth, claudeProxyUrl or firstResponseSeconds is required" };
+  if (b.defaultModel !== undefined) {
+    if (b.defaultModel !== null && typeof b.defaultModel !== "string") {
+      return { error: "defaultModel must be a string or null" };
+    }
+    const model = (b.defaultModel ?? "").trim();
+    if (model && !normalizeDefaultModel(model))
+      return { error: "Enter a model alias such as sonnet, or a model id, with no spaces" };
+    patch.defaultModel = model || null;
+  }
+  if (Object.keys(patch).length === 0) {
+    return { error: "claudeAuth, claudeProxyUrl, firstResponseSeconds or defaultModel is required" };
+  }
   return { patch };
 }
 
@@ -45390,6 +45409,7 @@ class ClaudeSession {
   query = null;
   launch = null;
   claudeSessionId = null;
+  model = null;
   refreshWanted = false;
   restarting = null;
   initSeen = false;
@@ -45487,7 +45507,8 @@ class ClaudeSession {
         input,
         abort,
         permissionMode: this.host.permissionMode(),
-        ...this.claudeSessionId ? { resume: this.claudeSessionId } : {}
+        ...this.claudeSessionId ? { resume: this.claudeSessionId } : {},
+        ...this.claudeSessionId && this.model ? { model: this.model } : {}
       });
     } catch (e) {
       input.close();
@@ -45569,6 +45590,8 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
         this.commands = msg.slash_commands.map((name) => ({ name, description: "", argumentHint: "" }));
         this.loadCommands();
       }
+      if (msg.model)
+        this.model = msg.model;
       if (!first) {
         this.host.update({ agentSessionId: msg.session_id, model: msg.model, ...mode ? { permissionMode: mode } : {} }, { quiet: true });
         return;
@@ -45668,9 +45691,11 @@ function createClaudeProvider(options = {}) {
     async start(opts) {
       const session = new ClaudeSession(opts.host);
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
-      session.launch = async ({ input, abort, permissionMode, resume }) => {
-        const launch = await claudeLaunch(await settings(), opts.cwd, await token());
+      session.launch = async ({ input, abort, permissionMode, resume, model }) => {
+        const own = await settings();
+        const launch = await claudeLaunch(own, opts.cwd, await token());
         const firstResponseMs = Math.max(0, Math.floor(await firstResponseSeconds() * 1000));
+        const runModel = model ?? own.defaultModel;
         const sdkOptions = {
           cwd: opts.cwd,
           pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
@@ -45683,6 +45708,7 @@ function createClaudeProvider(options = {}) {
           settingSources: ["user", "project", "local"],
           ...opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {},
           ...resume ? { resume } : {},
+          ...runModel ? { model: runModel } : {},
           env: launch.env,
           ...Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {},
           stderr: session.stderr
@@ -45713,7 +45739,9 @@ function createClaudeProvider(options = {}) {
       const prompt = new InputQueue;
       prompt.push(userMessage(req.prompt));
       prompt.close();
-      const launch = await claudeLaunch(await settings(), req.cwd, await token());
+      const own = await settings();
+      const launch = await claudeLaunch(own, req.cwd, await token());
+      const model = req.model ?? own.defaultModel;
       const timer = setTimeout(() => abortController.abort(), req.timeoutMs);
       try {
         const query = await factory()({
@@ -45728,7 +45756,7 @@ function createClaudeProvider(options = {}) {
             settingSources: [],
             persistSession: false,
             thinking: { type: "disabled" },
-            ...req.model ? { model: req.model } : {},
+            ...model ? { model } : {},
             ...req.schema ? { outputFormat: { type: "json_schema", schema: req.schema } } : {},
             abortController,
             env: launch.env,
@@ -45766,7 +45794,7 @@ function tilde(path) {
   const home = homedir3();
   return path && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
-function claudeAuthView(auth, login, firstResponseSeconds) {
+function claudeAuthView(auth, login, own) {
   return {
     mode: auth.mode,
     inferred: auth.inferred,
@@ -45785,7 +45813,8 @@ function claudeAuthView(auth, login, firstResponseSeconds) {
         tokenSource: tilde(auth.detected.tokenSource)
       }
     },
-    firstResponseSeconds,
+    firstResponseSeconds: own.firstResponseSeconds,
+    defaultModel: own.defaultModel,
     signIn: loginState()
   };
 }
@@ -45822,7 +45851,7 @@ var plugin = {
     const answer = async () => {
       const own = await settings();
       const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
-      return json(claudeAuthView(auth, await loginStatus(), own.firstResponseSeconds));
+      return json(claudeAuthView(auth, await loginStatus(), own));
     };
     const getAuth = () => answer();
     const postToken = async (req) => {
@@ -45917,5 +45946,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=A4D3330B035AD0B464756E2164756E21
+//# debugId=41ADCF0A9011330764756E2164756E21
 //# sourceMappingURL=host.js.map

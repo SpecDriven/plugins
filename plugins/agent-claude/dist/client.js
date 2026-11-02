@@ -67,6 +67,7 @@ var version = m2.version;
 
 // src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
+var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
 
 // specdriven-shim:react/jsx-runtime
 var m3 = globalThis.__specdriven?.modules?.["react/jsx-runtime"];
@@ -188,6 +189,11 @@ function ClaudeSettings() {
         refresh,
         onError: setError
       }),
+      /* @__PURE__ */ jsx(DefaultModel, {
+        info,
+        refresh,
+        onError: setError
+      }),
       error && /* @__PURE__ */ jsx("p", {
         className: "error",
         children: error
@@ -240,6 +246,70 @@ function ProxyTimeout({
           if (e.key === "Enter")
             e.currentTarget.blur();
         }
+      })
+    ]
+  });
+}
+function DefaultModel({
+  info,
+  refresh,
+  onError
+}) {
+  const [draft, setDraft] = useState(info.defaultModel ?? "");
+  useEffect(() => setDraft(info.defaultModel ?? ""), [info.defaultModel]);
+  const commit = async () => {
+    const model = draft.trim();
+    setDraft(model);
+    if (model === (info.defaultModel ?? ""))
+      return;
+    const failed = await patchClaudeSettings({ defaultModel: model || null });
+    onError(failed);
+    if (failed)
+      setDraft(info.defaultModel ?? "");
+    await refresh();
+  };
+  return /* @__PURE__ */ jsxs("label", {
+    className: "settings-row",
+    children: [
+      /* @__PURE__ */ jsxs("span", {
+        className: "settings-row-label",
+        children: [
+          "Default model",
+          /* @__PURE__ */ jsxs("span", {
+            className: "settings-row-hint",
+            children: [
+              "The model the coding agent pane and the app's other Claude calls start on — an alias such as ",
+              /* @__PURE__ */ jsx("code", {
+                children: "opus"
+              }),
+              " or ",
+              /* @__PURE__ */ jsx("code", {
+                children: "sonnet"
+              }),
+              ", or a full model id. Empty uses Claude Code's own default. Applies to sessions started after the change."
+            ]
+          })
+        ]
+      }),
+      /* @__PURE__ */ jsx("input", {
+        "aria-label": "Default Claude model",
+        list: "claude-model-aliases",
+        value: draft,
+        onChange: (e) => setDraft(e.target.value),
+        onBlur: () => void commit(),
+        onKeyDown: (e) => {
+          if (e.key === "Enter")
+            e.currentTarget.blur();
+        },
+        placeholder: "Claude Code's default",
+        autoComplete: "off",
+        spellCheck: false
+      }),
+      /* @__PURE__ */ jsx("datalist", {
+        id: "claude-model-aliases",
+        children: CLAUDE_MODEL_ALIASES.map((alias) => /* @__PURE__ */ jsx("option", {
+          value: alias
+        }, alias))
       })
     ]
   });
@@ -668,7 +738,7 @@ var plugin = {
     ctx.effect(() => settings.add({
       id: "claude",
       title: "Claude",
-      hint: "How the Claude the app starts signs in: your Claude account, or an API proxy with a token kept on this device.",
+      hint: "How the Claude the app starts signs in — your Claude account, or an API proxy with a token kept on this device — and the model it starts on.",
       order: CLAUDE_SETTINGS_ORDER,
       when: ({ demo, hosted }) => !demo && !hosted,
       Component: ClaudeSection
@@ -681,5 +751,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=FFB712140D7A0F9464756E2164756E21
+//# debugId=1A107FC44E837F6D64756E2164756E21
 //# sourceMappingURL=client.js.map

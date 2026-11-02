@@ -2,7 +2,8 @@
 // Claude signs in", specs/agents/agent-pane.feature.md "A Claude turn fails
 // fast when the API proxy does not answer", in the specs repo): how the
 // Claude the app starts signs in, the proxy it goes through, and how long a
-// turn behind that proxy waits for the API. Kept in the plugin's section of
+// turn behind that proxy waits for the API, and the model a new Claude
+// starts on ("Choose the model Claude starts on"). Kept in the plugin's section of
 // settings.json (HostConfig.settings); the top-level keys they lived under
 // while Claude was built into the app are adopted once (src/host.ts). Pure,
 // so the host and browser halves share it.
@@ -29,13 +30,24 @@ export interface ClaudeSettingsValues {
   claudeProxyUrl: string | null;
   /** The pane's first-response wait, whole seconds; 0 is no limit. */
   firstResponseSeconds: number;
+  /** The model a new Claude starts on, or null for Claude Code's own default. */
+  defaultModel: string | null;
 }
 
 export const DEFAULT_SETTINGS: ClaudeSettingsValues = {
   claudeAuth: null,
   claudeProxyUrl: null,
   firstResponseSeconds: DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
+  defaultModel: null,
 };
+
+/** The aliases Claude Code takes for `--model`; any full model id goes too. */
+export const CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"] as const;
+
+/** Letters, digits and the punctuation model ids use — `claude-opus-4-5`,
+    `claude-sonnet-4-5[1m]`, `us.anthropic.claude-…:0`, an inference profile's
+    arn — with no spaces. */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,199}$/;
 
 /** Stored sign-in choice, or null when absent or unusable. */
 export function normalizeClaudeAuth(value: unknown): ClaudeAuthMode | null {
@@ -64,12 +76,20 @@ export function normalizeAgentFirstResponseSeconds(value: unknown): number {
   return Math.floor(n);
 }
 
+/** Stored default model, trimmed, or null when absent or not a model id. */
+export function normalizeDefaultModel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const model = value.trim();
+  return MODEL_ID.test(model) ? model : null;
+}
+
 /** The plugin's values off its settings section. */
 export function claudeSettingsOf(section: Record<string, unknown>): ClaudeSettingsValues {
   return {
     claudeAuth: normalizeClaudeAuth(section.claudeAuth),
     claudeProxyUrl: normalizeClaudeProxyUrl(section.claudeProxyUrl),
     firstResponseSeconds: normalizeAgentFirstResponseSeconds(section.agentFirstResponseSeconds),
+    defaultModel: normalizeDefaultModel(section.defaultModel),
   };
 }
 
@@ -77,7 +97,8 @@ export function claudeSettingsOf(section: Record<string, unknown>): ClaudeSettin
  * A `PUT /api/claude/settings` body as a patch to the section, or the
  * refusal: `claudeAuth` login, proxy or null (forget the choice);
  * `claudeProxyUrl` an http(s) url, "" or null (forget it);
- * `firstResponseSeconds` a number >= 0, the default stored as no key.
+ * `firstResponseSeconds` a number >= 0, the default stored as no key;
+ * `defaultModel` a model id or alias, "" or null (Claude Code's own default).
  */
 export function claudeSettingsPatch(body: unknown): { patch: Record<string, unknown> } | { error: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "a settings object is required" };
@@ -106,6 +127,16 @@ export function claudeSettingsPatch(body: unknown): { patch: Record<string, unkn
     }
     patch.agentFirstResponseSeconds = Math.floor(n) === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS ? null : Math.floor(n);
   }
-  if (Object.keys(patch).length === 0) return { error: "claudeAuth, claudeProxyUrl or firstResponseSeconds is required" };
+  if (b.defaultModel !== undefined) {
+    if (b.defaultModel !== null && typeof b.defaultModel !== "string") {
+      return { error: "defaultModel must be a string or null" };
+    }
+    const model = (b.defaultModel ?? "").trim();
+    if (model && !normalizeDefaultModel(model)) return { error: "Enter a model alias such as sonnet, or a model id, with no spaces" };
+    patch.defaultModel = model || null;
+  }
+  if (Object.keys(patch).length === 0) {
+    return { error: "claudeAuth, claudeProxyUrl, firstResponseSeconds or defaultModel is required" };
+  }
   return { patch };
 }

@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createClaudeProvider, InputQueue } from "../src/provider";
 import type { QueryLike } from "../src/provider";
+import { DEFAULT_SETTINGS } from "../src/settings";
 
 let home: string;
 const realClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
@@ -28,11 +29,13 @@ afterEach(async () => {
   if (realBaseUrl !== undefined) process.env.ANTHROPIC_BASE_URL = realBaseUrl;
 });
 
-/** A provider whose queries answer `{"ok": true}` at once; the options each was started with. */
-function answering() {
+/** A provider whose queries answer `{"ok": true}` at once, with the default
+    model Settings names; the options each was started with. */
+function answering(defaultModel: string | null = null) {
   const started: Options[] = [];
   const provider = createClaudeProvider({
     available: () => true,
+    settings: async () => ({ ...DEFAULT_SETTINGS, defaultModel }),
     query: ({ prompt, options }: { prompt: AsyncIterable<SDKUserMessage> | string; options: Options }) => {
       void prompt;
       started.push(options);
@@ -60,7 +63,19 @@ test("a model asked for is the query's model", async () => {
   expect(started[0]!.model).toBe("claude-sonnet-4-6");
 });
 
-test("no model asked for leaves Claude Code's own default", async () => {
+test("a model asked for wins over the default Settings names", async () => {
+  const { provider, started } = answering("opus");
+  await provider.oneShot!({ ...request, model: "claude-haiku-4-5" });
+  expect(started[0]!.model).toBe("claude-haiku-4-5");
+});
+
+test("no model asked for is the default Settings names", async () => {
+  const { provider, started } = answering("sonnet");
+  await provider.oneShot!(request);
+  expect(started[0]!.model).toBe("sonnet");
+});
+
+test("no model asked for and none in Settings leaves Claude Code's own default", async () => {
   const { provider, started } = answering();
   await provider.oneShot!(request);
   expect("model" in started[0]!).toBe(false);
