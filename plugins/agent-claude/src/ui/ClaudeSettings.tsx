@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { AccountModel } from "../accountModels";
-import { CLAUDE_MODEL_ALIASES, DEFAULT_AGENT_FIRST_RESPONSE_SECONDS, type ClaudeAuthMode } from "../settings";
+import {
+  CLAUDE_EFFORTS,
+  CLAUDE_MODEL_ALIASES,
+  DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
+  type ClaudeAuthMode,
+  type ClaudeEffort,
+} from "../settings";
 
 // Settings → Claude (specs/agents/claude.feature.md "Choose how Claude signs
 // in", "API proxy settings are filled in from Claude Code's settings", "Sign
@@ -43,6 +49,9 @@ export interface ClaudeAuthInfo {
   firstResponseSeconds: number;
   /** The model a new Claude starts on; null is Claude Code's own default. */
   defaultModel: string | null;
+  /** The effort a new Claude starts at; null is Claude Code's own. Absent
+      from a plugin host before it. */
+  defaultEffort?: ClaudeEffort | null;
   signIn: ClaudeSignIn | null;
 }
 
@@ -52,6 +61,7 @@ async function patchClaudeSettings(patch: {
   claudeProxyUrl?: string | null;
   firstResponseSeconds?: number;
   defaultModel?: string | null;
+  defaultEffort?: ClaudeEffort | null;
 }): Promise<string | null> {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -175,6 +185,7 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
         refresh={refresh}
         onError={setError}
       />
+      <DefaultEffort info={info} refresh={refresh} onError={setError} />
       {error && <p className="error">{error}</p>}
     </div>
   );
@@ -226,6 +237,57 @@ function ProxyTimeout({
           if (e.key === "Enter") e.currentTarget.blur();
         }}
       />
+    </label>
+  );
+}
+
+/** Each level as the select names it. */
+const EFFORT_NAMES: Record<ClaudeEffort, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+/**
+ * "Default effort" (specs/agents/claude.feature.md "Pick Claude's model and
+ * effort in the pane"): how hard a new Claude thinks — the same value the
+ * coding agent pane's effort chip shows and sets. Claude Code lowers a
+ * level its model does not take.
+ */
+export function DefaultEffort({
+  info,
+  refresh,
+  onError,
+}: {
+  info: ClaudeAuthInfo;
+  refresh: () => Promise<void>;
+  onError: (error: string | null) => void;
+}) {
+  const pick = async (value: string) => {
+    const failed = await patchClaudeSettings({ defaultEffort: value ? (value as ClaudeEffort) : null });
+    onError(failed);
+    await refresh();
+  };
+  return (
+    <label className="settings-row">
+      <span className="settings-row-label">
+        Default effort
+        <span className="settings-row-hint">
+          How hard Claude thinks in the coding agent pane, unless you pick another level there. A
+          level the model does not take is lowered to one it does. Applies to sessions started after
+          the change.
+        </span>
+      </span>
+      <select aria-label="Default Claude effort" value={info.defaultEffort ?? ""} onChange={(e) => void pick(e.target.value)}>
+        <option value="">Claude Code's default</option>
+        {CLAUDE_EFFORTS.map((e) => (
+          <option key={e} value={e}>
+            {EFFORT_NAMES[e]}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

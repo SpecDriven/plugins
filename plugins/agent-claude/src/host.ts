@@ -9,7 +9,7 @@
 // Claude only, so every route refuses in the hosted app and the demo.
 
 import { homedir } from "node:os";
-import { HOSTED_REFUSAL, isDemoMode, isHostedMode, json } from "@specdriven/host";
+import { AgentError, HOSTED_REFUSAL, isDemoMode, isHostedMode, json } from "@specdriven/host";
 import type { Context, Handler, HostConfig, Plugin, SecretStore } from "@specdriven/host";
 import {
   ClaudeAuthError,
@@ -78,6 +78,8 @@ function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus, own: Clau
     firstResponseSeconds: own.firstResponseSeconds,
     /** The model a new Claude starts on; null is Claude Code's own default. */
     defaultModel: own.defaultModel,
+    /** The effort a new Claude starts at; null is Claude Code's own. */
+    defaultEffort: own.defaultEffort,
     signIn: loginState(),
   };
 }
@@ -106,6 +108,13 @@ const plugin: Plugin<Context, HostConfig> = {
           settings,
           token: () => storedToken(secrets),
           listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
+          accountModels: () => signedInAccountModels(),
+          // The pane's model and effort picks become Settings → Claude's defaults.
+          saveSettings: async (patch) => {
+            const parsed = claudeSettingsPatch(patch);
+            if ("error" in parsed) throw new AgentError(400, parsed.error);
+            await config.settings.write(parsed.patch);
+          },
         }),
       ),
     );
@@ -139,6 +148,17 @@ const plugin: Plugin<Context, HostConfig> = {
       } catch {
         return process.cwd();
       }
+    };
+
+    /** The models the signed-in Claude account offers, for Settings →
+        Claude's Default model and the pane's model menu; none behind a
+        proxy or with no one signed in. */
+    const signedInAccountModels = async () => {
+      const own = await settings();
+      const cwd = await claudeCwd();
+      const token = await storedToken(secrets);
+      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login") return [];
+      return accountModels(async () => ((await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : []));
     };
 
     const answer = async (): Promise<Response> => {
@@ -224,15 +244,8 @@ const plugin: Plugin<Context, HostConfig> = {
     // The models the Claude account offers, for Settings → Claude's
     // "Default model"; none behind a proxy or with no one signed in.
     const getModels: Handler = async () => {
-      const own = await settings();
-      const cwd = await claudeCwd();
-      const token = await storedToken(secrets);
-      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login") return json({ models: [] });
       try {
-        const models = await accountModels(async () =>
-          (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : [],
-        );
-        return json({ models });
+        return json({ models: await signedInAccountModels() });
       } catch (e) {
         return json({ models: [], error: (e as Error).message }, 502);
       }

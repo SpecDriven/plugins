@@ -32,6 +32,19 @@ export interface ClaudeSettingsValues {
   firstResponseSeconds: number;
   /** The model a new Claude starts on, or null for Claude Code's own default. */
   defaultModel: string | null;
+  /** The effort a new Claude starts at, or null for Claude Code's own
+      (specs/agents/claude.feature.md "Pick Claude's model and effort in the pane"). */
+  defaultEffort: ClaudeEffort | null;
+}
+
+/** How hard Claude thinks, as Claude Code names the levels. */
+export type ClaudeEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+export const CLAUDE_EFFORTS: readonly ClaudeEffort[] = ["low", "medium", "high", "xhigh", "max"];
+
+/** Stored default effort, or null when absent or no level. */
+export function normalizeDefaultEffort(value: unknown): ClaudeEffort | null {
+  return (CLAUDE_EFFORTS as readonly unknown[]).includes(value) ? (value as ClaudeEffort) : null;
 }
 
 export const DEFAULT_SETTINGS: ClaudeSettingsValues = {
@@ -39,6 +52,7 @@ export const DEFAULT_SETTINGS: ClaudeSettingsValues = {
   claudeProxyUrl: null,
   firstResponseSeconds: DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
   defaultModel: null,
+  defaultEffort: null,
 };
 
 /** The aliases Claude Code takes for `--model`; any full model id goes too. */
@@ -90,6 +104,7 @@ export function claudeSettingsOf(section: Record<string, unknown>): ClaudeSettin
     claudeProxyUrl: normalizeClaudeProxyUrl(section.claudeProxyUrl),
     firstResponseSeconds: normalizeAgentFirstResponseSeconds(section.agentFirstResponseSeconds),
     defaultModel: normalizeDefaultModel(section.defaultModel),
+    defaultEffort: normalizeDefaultEffort(section.defaultEffort),
   };
 }
 
@@ -98,7 +113,8 @@ export function claudeSettingsOf(section: Record<string, unknown>): ClaudeSettin
  * refusal: `claudeAuth` login, proxy or null (forget the choice);
  * `claudeProxyUrl` an http(s) url, "" or null (forget it);
  * `firstResponseSeconds` a number >= 0, the default stored as no key;
- * `defaultModel` a model id or alias, "" or null (Claude Code's own default).
+ * `defaultModel` a model id or alias, "" or null (Claude Code's own default);
+ * `defaultEffort` a level, or null (Claude Code's own).
  */
 export function claudeSettingsPatch(body: unknown): { patch: Record<string, unknown> } | { error: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "a settings object is required" };
@@ -135,8 +151,14 @@ export function claudeSettingsPatch(body: unknown): { patch: Record<string, unkn
     if (model && !normalizeDefaultModel(model)) return { error: "Enter a model alias such as sonnet, or a model id, with no spaces" };
     patch.defaultModel = model || null;
   }
+  if (b.defaultEffort !== undefined) {
+    if (b.defaultEffort !== null && !normalizeDefaultEffort(b.defaultEffort)) {
+      return { error: `defaultEffort must be one of ${CLAUDE_EFFORTS.join(", ")}, or null` };
+    }
+    patch.defaultEffort = b.defaultEffort;
+  }
   if (Object.keys(patch).length === 0) {
-    return { error: "claudeAuth, claudeProxyUrl, firstResponseSeconds or defaultModel is required" };
+    return { error: "claudeAuth, claudeProxyUrl, firstResponseSeconds, defaultModel or defaultEffort is required" };
   }
   return { patch };
 }
