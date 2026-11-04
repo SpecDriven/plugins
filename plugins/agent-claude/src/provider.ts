@@ -22,14 +22,9 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { AgentError, normalizePermissionMode } from "@specdriven/host";
 import type {
-  AgentChoices,
-  AgentDefaultsPatch,
   AgentHost,
-  AgentModelOption,
   AgentOutput,
-  AgentProvider,
   AgentSession,
-  AgentStartOptions,
   AssistantBlock,
   ChatAccount,
   OneShotRequest,
@@ -40,6 +35,7 @@ import type {
 import { claudeLaunch, detectClaudeProxy } from "./auth";
 import { CLAUDE_BIN, claudeAvailable, claudeExecutable } from "./cli";
 import type { AccountModel } from "./accountModels";
+import type { AgentChoices, AgentDefaultsPatch, AgentModelOption, PaneProvider, PaneStartOptions } from "./paneContract";
 import { CLAUDE_MODEL_ALIASES, DEFAULT_SETTINGS, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 // --- The account chip -------------------------------------------------------
@@ -791,7 +787,7 @@ const ALIAS_MENU: AgentModelOption[] = CLAUDE_MODEL_ALIASES.filter((a) => a !== 
 }));
 
 /** The Claude provider; the host half hands it the plugin's settings and token. */
-export function createClaudeProvider(options: ClaudeProviderOptions = {}): AgentProvider {
+export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneProvider {
   const factory = () => options.query ?? currentQueryFactory();
   const settings = options.settings ?? (async () => DEFAULT_SETTINGS);
   const token = options.token ?? (async () => null);
@@ -823,7 +819,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
     loginHint: {
       text: "Claude is not signed in on this machine: sign in with your email in Settings → Claude.",
     },
-    async start(opts: AgentStartOptions): Promise<AgentSession> {
+    async start(opts: PaneStartOptions): Promise<AgentSession> {
       const session = new ClaudeSession(opts.host);
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
       session.launch = async ({ input, abort, permissionMode, resume, model, effort }) => {
