@@ -1083,6 +1083,9 @@ withChanged("a session carried on under a new sign-in keeps the model it ran on"
 // and effort and switches them mid-session.
 const withBar = test.if("setChatModel" in engine);
 
+/** A session's effort; ChatSessionMeta has it only from the app that has the bar. */
+const effortOf = (meta: ChatSessionMeta) => (meta as { effort?: string }).effort;
+
 withBar("a session starts on the model and effort the pane picked, over the defaults Settings names", async () => {
   await writeState(
     { dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "opus", defaultEffort: "low" } }, ...quietProfile(data) },
@@ -1091,13 +1094,13 @@ withBar("a session starts on the model and effort the pane picked, over the defa
   const picked = (await (await api("/api/agent/chat", "POST", { name: "picked", model: "sonnet", effort: "max" })).json()) as ChatSessionMeta;
   expect(fakes.at(-1)!.options).toMatchObject({ model: "sonnet", effort: "max" });
   fakes.at(-1)!.emit(init());
-  expect((await untilStatus(picked.id, "idle")).meta.effort).toBe("max");
+  expect(effortOf((await untilStatus(picked.id, "idle")).meta)).toBe("max");
 
   const plain = (await (await api("/api/agent/chat", "POST", { name: "plain" })).json()) as ChatSessionMeta;
   expect(fakes.at(-1)!.options).toMatchObject({ model: "opus", effort: "low" });
   fakes.at(-1)!.emit(init());
   // The effort Settings names is the session's, though the pane sent none.
-  expect((await untilStatus(plain.id, "idle")).meta.effort).toBe("low");
+  expect(effortOf((await untilStatus(plain.id, "idle")).meta)).toBe("low");
 
   await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true } }, ...quietProfile(data) }, root);
   expect((await api("/api/agent/chat", "POST", { name: "bare" })).status).toBe(200);
