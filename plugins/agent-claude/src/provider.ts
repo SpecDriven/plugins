@@ -22,7 +22,10 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { AgentError, normalizePermissionMode } from "@specdriven/host";
 import type {
+  AgentChoices,
+  AgentDefaultsPatch,
   AgentHost,
+  AgentModelOption,
   AgentOutput,
   AgentProvider,
   AgentSession,
@@ -36,7 +39,8 @@ import type {
 } from "@specdriven/host";
 import { claudeLaunch, detectClaudeProxy } from "./auth";
 import { CLAUDE_BIN, claudeAvailable, claudeExecutable } from "./cli";
-import { DEFAULT_SETTINGS, type ClaudeSettingsValues } from "./settings";
+import type { AccountModel } from "./accountModels";
+import { CLAUDE_MODEL_ALIASES, DEFAULT_SETTINGS, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 // --- The account chip -------------------------------------------------------
 
@@ -186,6 +190,10 @@ export interface QueryLike extends AsyncIterable<SDKMessage> {
   accountInfo?(): Promise<AccountInfoLike | undefined>;
   /** Optional: the account's model menu (src/accountModels.ts). */
   supportedModels?(): Promise<unknown[]>;
+  /** Switch the model from the next request on; undefined is Claude Code's own. */
+  setModel?(model?: string): Promise<void>;
+  /** Merge settings into the session's flag layer (the effort, here). */
+  applyFlagSettings?(settings: { effortLevel?: ClaudeEffort | null }): Promise<void>;
 }
 
 export type QueryFactory = (args: {
@@ -388,6 +396,8 @@ interface LaunchArgs {
   resume?: string;
   /** The model the run before ran on, which the conversation keeps. */
   model?: string;
+  /** The effort the run before ran at, which the conversation keeps. */
+  effort?: ClaudeEffort;
 }
 
 /** Start one Claude Code run with the sign-in as it stands now. */
@@ -405,6 +415,9 @@ class ClaudeSession implements AgentSession {
   private claudeSessionId: string | null = null;
   /** The model Claude Code said it runs on (init), which a new run keeps. */
   private model: string | null = null;
+  /** The effort the session runs at (start, then the pane's switch), which
+      a new run keeps; null is Claude Code's own. */
+  effort: ClaudeEffort | null = null;
   /** A sign-in change came while a turn ran or Claude was starting. */
   private refreshWanted = false;
   /** The new run being started; a message typed meanwhile waits for it. */
@@ -476,6 +489,26 @@ class ClaudeSession implements AgentSession {
     await this.query!.setPermissionMode(mode);
   }
 
+  /** The pane's model pick (specs/agents/claude.feature.md "Pick Claude's
+      model and effort in the pane"): from the next request on, and for any
+      run that carries the conversation on. */
+  async setModel(model: string | null): Promise<void> {
+    if (this.host.status() === "starting") throw new AgentError(409, "Claude is still starting");
+    if (this.restarting) await this.restarting;
+    if (!this.query?.setModel) throw new AgentError(409, "This Claude Code cannot switch models mid-session");
+    await this.query.setModel(model ?? undefined);
+    this.model = model;
+  }
+
+  /** The pane's effort pick, the same way. */
+  async setEffort(effort: ClaudeEffort | null): Promise<void> {
+    if (this.host.status() === "starting") throw new AgentError(409, "Claude is still starting");
+    if (this.restarting) await this.restarting;
+    if (!this.query?.applyFlagSettings) throw new AgentError(409, "This Claude Code cannot change effort mid-session");
+    await this.query.applyFlagSettings({ effortLevel: effort });
+    this.effort = effort;
+  }
+
   close(): void {
     this.disarmFirstResponse();
     this.input.close();
@@ -530,6 +563,7 @@ class ClaudeSession implements AgentSession {
         permissionMode: this.host.permissionMode(),
         ...(this.claudeSessionId ? { resume: this.claudeSessionId } : {}),
         ...(this.claudeSessionId && this.model ? { model: this.model } : {}),
+        ...(this.effort ? { effort: this.effort } : {}),
       });
     } catch (e) {
       input.close();
@@ -589,7 +623,11 @@ class ClaudeSession implements AgentSession {
       // Older binaries lack the request; the pane just shows no chip.
     }
     if (this.final) return;
-    this.host.ready({ commands: this.commands, ...(account ? { account } : {}) });
+    this.host.ready({
+      commands: this.commands,
+      ...(account ? { account } : {}),
+      ...(this.effort ? { effort: this.effort } : {}),
+    });
     this.refreshIfWanted();
   }
 
@@ -737,7 +775,20 @@ export interface ClaudeProviderOptions {
   token?: () => Promise<string | null>;
   /** The models the data repo lists for Claude (src/models.ts); default: none. */
   listedModels?: () => Promise<string[]>;
+  /** The models the signed-in Claude account offers (src/accountModels.ts);
+      none behind a proxy or signed out. Default: none. */
+  accountModels?: () => Promise<AccountModel[]>;
+  /** Write a patch to the plugin's settings section (HostConfig.settings);
+      default: nothing is kept. */
+  saveSettings?: (patch: Record<string, unknown>) => Promise<void>;
 }
+
+/** The pane's menu with nothing listed: Claude Code's aliases for its latest models. */
+const ALIAS_MENU: AgentModelOption[] = CLAUDE_MODEL_ALIASES.filter((a) => a !== "opusplan").map((a) => ({
+  value: a,
+  displayName: a.charAt(0).toUpperCase() + a.slice(1),
+  description: `Claude Code's latest ${a.charAt(0).toUpperCase() + a.slice(1)}`,
+}));
 
 /** The Claude provider; the host half hands it the plugin's settings and token. */
 export function createClaudeProvider(options: ClaudeProviderOptions = {}): AgentProvider {
@@ -765,6 +816,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
       hasAccount: true,
       rememberPermissions: "rule",
       oneShot: true,
+      canChangeModelMidSession: true,
+      effort: true,
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -773,7 +826,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
     async start(opts: AgentStartOptions): Promise<AgentSession> {
       const session = new ClaudeSession(opts.host);
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
-      session.launch = async ({ input, abort, permissionMode, resume, model }) => {
+      session.launch = async ({ input, abort, permissionMode, resume, model, effort }) => {
         // The sign-in Settings chose (src/auth.ts), read afresh for every
         // run: the environment to inherit, and the `--settings` override
         // that makes Claude Code honor the choice over its own settings files.
@@ -783,7 +836,10 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
         // A carried-on conversation keeps the model it ran on, whatever the
         // default says now; a new one starts on the default Settings names,
         // else the first listed model, else Claude Code's own.
-        const runModel = model ?? (await defaultModel(own));
+        // The pane's pick for a new session comes as opts.model.
+        const runModel = model ?? opts.model ?? (await defaultModel(own));
+        // The effort likewise: the run before's, the pane's, the default.
+        const runEffort = effort ?? opts.effort ?? own.defaultEffort;
         const sdkOptions: Options = {
           cwd: opts.cwd,
           pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
@@ -802,6 +858,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
           ...(opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {}),
           ...(resume ? { resume } : {}),
           ...(runModel ? { model: runModel } : {}),
+          ...(runEffort ? { effort: runEffort } : {}),
           env: launch.env,
           ...(Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}),
           stderr: session.stderr,
@@ -809,6 +866,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
         const query = await factory()({ prompt: input, options: sdkOptions });
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
+      session.effort = opts.effort ?? (await settings()).defaultEffort;
       if (opts.prompt) session.input.push(userMessage(opts.prompt));
       try {
         const run = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
@@ -823,6 +881,36 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): Agent
       void session.pump(session.query);
       void session.ready();
       return session;
+    },
+    /** The pane's model and effort menus: the account's models while it
+        signs in with one, else the data repo's list for Claude, else Claude
+        Code's aliases; and what a new session starts on. */
+    async choices(): Promise<AgentChoices> {
+      const own = await settings();
+      const account = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => [] as AccountModel[]);
+      const listed = account.length > 0 ? [] : await listedModels();
+      const models: AgentModelOption[] =
+        account.length > 0
+          ? account.map((m) => ({
+              value: m.value,
+              ...(m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}),
+              displayName: m.displayName,
+              ...(m.description ? { description: m.description } : {}),
+              ...(m.efforts ? { efforts: m.efforts } : {}),
+            }))
+          : listed.length > 0
+            ? listed.map((m) => ({ value: m, displayName: m }))
+            : ALIAS_MENU;
+      return { models, model: await defaultModel(own), effort: own.defaultEffort };
+    },
+    /** A pick in the pane becomes Settings → Claude's default. */
+    async setDefaults(patch: AgentDefaultsPatch): Promise<void> {
+      const section: Record<string, unknown> = {};
+      if (patch.model !== undefined) section.defaultModel = patch.model;
+      if (patch.effort !== undefined) section.defaultEffort = patch.effort;
+      if (Object.keys(section).length === 0) return;
+      if (!options.saveSettings) throw new AgentError(409, "Claude keeps no defaults here");
+      await options.saveSettings(section);
     },
     async oneShot(req: OneShotRequest): Promise<OneShotResult> {
       const abortController = new AbortController();

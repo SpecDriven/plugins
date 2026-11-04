@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../plugins-composer-bar/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// src/host.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44568,20 +44568,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// src/auth.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// src/binary.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// src/binaries.json
+// ../plugins-composer-bar/plugins/agent-claude/src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44596,7 +44596,7 @@ var binaries_default = {
   }
 };
 
-// src/binary.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44724,7 +44724,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// src/cli.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44736,17 +44736,23 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// src/settings.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
+var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+function normalizeDefaultEffort(value) {
+  return CLAUDE_EFFORTS.includes(value) ? value : null;
+}
 var DEFAULT_SETTINGS = {
   claudeAuth: null,
   claudeProxyUrl: null,
   firstResponseSeconds: DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
-  defaultModel: null
+  defaultModel: null,
+  defaultEffort: null
 };
+var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
 var MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,199}$/;
 function normalizeClaudeAuth(value) {
   return CLAUDE_AUTH_MODES.includes(value) ? value : null;
@@ -44781,7 +44787,8 @@ function claudeSettingsOf(section) {
     claudeAuth: normalizeClaudeAuth(section.claudeAuth),
     claudeProxyUrl: normalizeClaudeProxyUrl(section.claudeProxyUrl),
     firstResponseSeconds: normalizeAgentFirstResponseSeconds(section.agentFirstResponseSeconds),
-    defaultModel: normalizeDefaultModel(section.defaultModel)
+    defaultModel: normalizeDefaultModel(section.defaultModel),
+    defaultEffort: normalizeDefaultEffort(section.defaultEffort)
   };
 }
 function claudeSettingsPatch(body) {
@@ -44824,13 +44831,19 @@ function claudeSettingsPatch(body) {
       return { error: "Enter a model alias such as sonnet, or a model id, with no spaces" };
     patch.defaultModel = model || null;
   }
+  if (b.defaultEffort !== undefined) {
+    if (b.defaultEffort !== null && !normalizeDefaultEffort(b.defaultEffort)) {
+      return { error: `defaultEffort must be one of ${CLAUDE_EFFORTS.join(", ")}, or null` };
+    }
+    patch.defaultEffort = b.defaultEffort;
+  }
   if (Object.keys(patch).length === 0) {
-    return { error: "claudeAuth, claudeProxyUrl, firstResponseSeconds or defaultModel is required" };
+    return { error: "claudeAuth, claudeProxyUrl, firstResponseSeconds, defaultModel or defaultEffort is required" };
   }
   return { patch };
 }
 
-// src/auth.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/auth.ts
 class ClaudeAuthError extends Error {
   status;
   constructor(message, status) {
@@ -45169,7 +45182,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// src/provider.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45410,6 +45423,7 @@ class ClaudeSession {
   launch = null;
   claudeSessionId = null;
   model = null;
+  effort = null;
   refreshWanted = false;
   restarting = null;
   initSeen = false;
@@ -45464,6 +45478,26 @@ class ClaudeSession {
       throw new AgentError(409, "Claude is still starting");
     await this.query.setPermissionMode(mode);
   }
+  async setModel(model) {
+    if (this.host.status() === "starting")
+      throw new AgentError(409, "Claude is still starting");
+    if (this.restarting)
+      await this.restarting;
+    if (!this.query?.setModel)
+      throw new AgentError(409, "This Claude Code cannot switch models mid-session");
+    await this.query.setModel(model ?? undefined);
+    this.model = model;
+  }
+  async setEffort(effort) {
+    if (this.host.status() === "starting")
+      throw new AgentError(409, "Claude is still starting");
+    if (this.restarting)
+      await this.restarting;
+    if (!this.query?.applyFlagSettings)
+      throw new AgentError(409, "This Claude Code cannot change effort mid-session");
+    await this.query.applyFlagSettings({ effortLevel: effort });
+    this.effort = effort;
+  }
   close() {
     this.disarmFirstResponse();
     this.input.close();
@@ -45508,7 +45542,8 @@ class ClaudeSession {
         abort,
         permissionMode: this.host.permissionMode(),
         ...this.claudeSessionId ? { resume: this.claudeSessionId } : {},
-        ...this.claudeSessionId && this.model ? { model: this.model } : {}
+        ...this.claudeSessionId && this.model ? { model: this.model } : {},
+        ...this.effort ? { effort: this.effort } : {}
       });
     } catch (e) {
       input.close();
@@ -45558,7 +45593,11 @@ class ClaudeSession {
     } catch {}
     if (this.final)
       return;
-    this.host.ready({ commands: this.commands, ...account ? { account } : {} });
+    this.host.ready({
+      commands: this.commands,
+      ...account ? { account } : {},
+      ...this.effort ? { effort: this.effort } : {}
+    });
     this.refreshIfWanted();
   }
   async pump(query) {
@@ -45663,6 +45702,11 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
     } catch {}
   }
 }
+var ALIAS_MENU = CLAUDE_MODEL_ALIASES.filter((a) => a !== "opusplan").map((a) => ({
+  value: a,
+  displayName: a.charAt(0).toUpperCase() + a.slice(1),
+  description: `Claude Code's latest ${a.charAt(0).toUpperCase() + a.slice(1)}`
+}));
 function createClaudeProvider(options = {}) {
   const factory = () => options.query ?? currentQueryFactory();
   const settings = options.settings ?? (async () => DEFAULT_SETTINGS);
@@ -45684,7 +45728,9 @@ function createClaudeProvider(options = {}) {
       canChangeModeMidSession: true,
       hasAccount: true,
       rememberPermissions: "rule",
-      oneShot: true
+      oneShot: true,
+      canChangeModelMidSession: true,
+      effort: true
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -45693,11 +45739,12 @@ function createClaudeProvider(options = {}) {
     async start(opts) {
       const session = new ClaudeSession(opts.host);
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
-      session.launch = async ({ input, abort, permissionMode, resume, model }) => {
+      session.launch = async ({ input, abort, permissionMode, resume, model, effort }) => {
         const own = await settings();
         const launch = await claudeLaunch(own, opts.cwd, await token());
         const firstResponseMs = Math.max(0, Math.floor(await firstResponseSeconds() * 1000));
-        const runModel = model ?? await defaultModel(own);
+        const runModel = model ?? opts.model ?? await defaultModel(own);
+        const runEffort = effort ?? opts.effort ?? own.defaultEffort;
         const sdkOptions = {
           cwd: opts.cwd,
           pathToClaudeCodeExecutable: claudeExecutable() ?? undefined,
@@ -45711,6 +45758,7 @@ function createClaudeProvider(options = {}) {
           ...opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {},
           ...resume ? { resume } : {},
           ...runModel ? { model: runModel } : {},
+          ...runEffort ? { effort: runEffort } : {},
           env: launch.env,
           ...Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {},
           stderr: session.stderr
@@ -45718,6 +45766,7 @@ function createClaudeProvider(options = {}) {
         const query = await factory()({ prompt: input, options: sdkOptions });
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
+      session.effort = opts.effort ?? (await settings()).defaultEffort;
       if (opts.prompt)
         session.input.push(userMessage(opts.prompt));
       try {
@@ -45734,6 +45783,31 @@ function createClaudeProvider(options = {}) {
       session.pump(session.query);
       session.ready();
       return session;
+    },
+    async choices() {
+      const own = await settings();
+      const account = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => []);
+      const listed = account.length > 0 ? [] : await listedModels();
+      const models = account.length > 0 ? account.map((m2) => ({
+        value: m2.value,
+        ...m2.resolvedModel ? { resolvedModel: m2.resolvedModel } : {},
+        displayName: m2.displayName,
+        ...m2.description ? { description: m2.description } : {},
+        ...m2.efforts ? { efforts: m2.efforts } : {}
+      })) : listed.length > 0 ? listed.map((m2) => ({ value: m2, displayName: m2 })) : ALIAS_MENU;
+      return { models, model: await defaultModel(own), effort: own.defaultEffort };
+    },
+    async setDefaults(patch) {
+      const section = {};
+      if (patch.model !== undefined)
+        section.defaultModel = patch.model;
+      if (patch.effort !== undefined)
+        section.defaultEffort = patch.effort;
+      if (Object.keys(section).length === 0)
+        return;
+      if (!options.saveSettings)
+        throw new AgentError(409, "Claude keeps no defaults here");
+      await options.saveSettings(section);
     },
     async oneShot(req) {
       const abortController = new AbortController;
@@ -45782,7 +45856,14 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// src/accountModels.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/accountModels.ts
+function effortsOf(row) {
+  if (row.supportsEffort === false)
+    return [];
+  if (!Array.isArray(row.supportedEffortLevels))
+    return;
+  return CLAUDE_EFFORTS.filter((e) => row.supportedEffortLevels.includes(e));
+}
 var ACCOUNT_MODELS_TIMEOUT_MS = 20000;
 var ACCOUNT_MODELS_TTL_MS = 10 * 60000;
 function accountModelsOf(rows) {
@@ -45794,11 +45875,13 @@ function accountModelsOf(rows) {
     if (!value || models.some((m2) => m2.value === value))
       continue;
     const resolved = normalizeDefaultModel(row.resolvedModel);
+    const efforts = effortsOf(row);
     models.push({
       value,
       ...resolved ? { resolvedModel: resolved } : {},
       displayName: typeof row.displayName === "string" && row.displayName ? row.displayName : value,
-      description: typeof row.description === "string" ? row.description : ""
+      description: typeof row.description === "string" ? row.description : "",
+      ...efforts ? { efforts } : {}
     });
   }
   return models;
@@ -45857,7 +45940,7 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// src/models.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
@@ -45875,7 +45958,7 @@ async function listedClaudeModels(dataDir) {
   }
 }
 
-// src/host.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -45910,6 +45993,7 @@ function claudeAuthView(auth, login, own) {
     },
     firstResponseSeconds: own.firstResponseSeconds,
     defaultModel: own.defaultModel,
+    defaultEffort: own.defaultEffort,
     signIn: loginState()
   };
 }
@@ -45929,7 +46013,14 @@ var plugin = {
     ctx.effect(() => agents2.register(createClaudeProvider({
       settings,
       token: () => storedToken(secrets),
-      listedModels: async () => listedClaudeModels(await data.dir().catch(() => null))
+      listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
+      accountModels: () => signedInAccountModels(),
+      saveSettings: async (patch) => {
+        const parsed = claudeSettingsPatch(patch);
+        if ("error" in parsed)
+          throw new AgentError(400, parsed.error);
+        await config.settings.write(parsed.patch);
+      }
     })));
     const signInChanged2 = () => {
       forgetAccountModels();
@@ -45949,6 +46040,14 @@ var plugin = {
       } catch {
         return process.cwd();
       }
+    };
+    const signedInAccountModels = async () => {
+      const own = await settings();
+      const cwd = await claudeCwd();
+      const token = await storedToken(secrets);
+      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login")
+        return [];
+      return accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : []);
     };
     const answer = async () => {
       const own = await settings();
@@ -46017,14 +46116,8 @@ var plugin = {
       return answer();
     };
     const getModels = async () => {
-      const own = await settings();
-      const cwd = await claudeCwd();
-      const token = await storedToken(secrets);
-      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login")
-        return json({ models: [] });
       try {
-        const models = await accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : []);
-        return json({ models });
+        return json({ models: await signedInAccountModels() });
       } catch (e) {
         return json({ models: [], error: e.message }, 502);
       }
@@ -46062,5 +46155,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=81A415B192898FA464756E2164756E21
+//# debugId=BE8349058D163AC264756E2164756E21
 //# sourceMappingURL=host.js.map

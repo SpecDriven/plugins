@@ -48,7 +48,7 @@ import { integrityOf, packageTarball, servingFetch } from "./registry";
 const tokenStore = () => secretStore("agent-claude.token");
 const token = async () => (await tokenStore().load())?.token ?? null;
 /** The plugin's values with what a test sets, the rest default. */
-const vals = (o: Partial<ClaudeSettingsValues>): ClaudeSettingsValues => ({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15, defaultModel: null, ...o });
+const vals = (o: Partial<ClaudeSettingsValues>): ClaudeSettingsValues => ({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15, defaultModel: null, defaultEffort: null, ...o });
 let unmount: () => Promise<void> = async () => {};
 
 const realRoot = process.env.SPECDRIVEN_ROOT;
@@ -771,19 +771,20 @@ test("the plugin adopts the old top-level keys once, and PUT /api/claude/setting
 
   const own = await call("GET", "/api/claude/settings");
   expect(own.status).toBe(200);
-  expect(own.body).toEqual({ claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", firstResponseSeconds: 30, defaultModel: null });
+  expect(own.body).toEqual({ claudeAuth: "proxy", claudeProxyUrl: "http://old.test:9/", firstResponseSeconds: 30, defaultModel: null, defaultEffort: null });
   const changed = await call("PUT", "/api/claude/settings", {
     claudeAuth: "login",
     claudeProxyUrl: " http://new.test:9/ ",
     firstResponseSeconds: 15,
     defaultModel: " sonnet ",
+    defaultEffort: "high",
   });
   expect(changed.status).toBe(200);
-  expect(changed.body).toEqual({ claudeAuth: "login", claudeProxyUrl: "http://new.test:9/", firstResponseSeconds: 15, defaultModel: "sonnet" });
+  expect(changed.body).toEqual({ claudeAuth: "login", claudeProxyUrl: "http://new.test:9/", firstResponseSeconds: 15, defaultModel: "sonnet", defaultEffort: "high" });
   // The section wins over the old keys; the default wait is stored as no key.
   const after = await readState(root);
   expect(after.pluginSettings).toEqual({
-    "agent-claude": { adopted: true, claudeAuth: "login", claudeProxyUrl: "http://new.test:9/", defaultModel: "sonnet" },
+    "agent-claude": { adopted: true, claudeAuth: "login", claudeProxyUrl: "http://new.test:9/", defaultModel: "sonnet", defaultEffort: "high" },
   });
   expect((after as Record<string, unknown>).claudeAuth).toBe("proxy");
   expect((await call("GET", "/api/claude/auth")).body).toMatchObject({
@@ -791,19 +792,21 @@ test("the plugin adopts the old top-level keys once, and PUT /api/claude/setting
     inferred: false,
     firstResponseSeconds: 15,
     defaultModel: "sonnet",
+    defaultEffort: "high",
   });
 
   // Null or "" forgets a choice; a bad value is refused; the old top-level keys are no settings any more.
-  const forgotten = await call("PUT", "/api/claude/settings", { claudeAuth: null, claudeProxyUrl: null, defaultModel: "" });
-  expect(forgotten.body).toMatchObject({ claudeAuth: null, claudeProxyUrl: null, defaultModel: null });
+  const forgotten = await call("PUT", "/api/claude/settings", { claudeAuth: null, claudeProxyUrl: null, defaultModel: "", defaultEffort: null });
+  expect(forgotten.body).toMatchObject({ claudeAuth: null, claudeProxyUrl: null, defaultModel: null, defaultEffort: null });
   expect((await call("PUT", "/api/claude/settings", { claudeAuth: "ldap" })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", { firstResponseSeconds: -1 })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", { defaultModel: "claude opus" })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", { defaultModel: 4 })).status).toBe(400);
+  expect((await call("PUT", "/api/claude/settings", { defaultEffort: "huge" })).status).toBe(400);
   expect((await call("PUT", "/api/claude/settings", {})).status).toBe(400);
   expect((await call("PUT", "/api/state", { claudeAuth: "proxy", agentFirstResponseSeconds: 5 })).status).toBe(400);
   expect((await readState(root)).pluginSettings).toEqual({ "agent-claude": { adopted: true } });
-  expect((await call("GET", "/api/claude/settings")).body).toEqual({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15, defaultModel: null });
+  expect((await call("GET", "/api/claude/settings")).body).toEqual({ claudeAuth: null, claudeProxyUrl: null, firstResponseSeconds: 15, defaultModel: null, defaultEffort: null });
 });
 
 test("a Claude plugin switched off takes its routes and its provider away", async () => {

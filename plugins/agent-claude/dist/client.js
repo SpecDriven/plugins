@@ -65,8 +65,9 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// src/settings.ts
+// ../plugins-composer-bar/plugins/agent-claude/src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
+var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
 
 // specdriven-shim:react/jsx-runtime
@@ -78,7 +79,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// src/ui/ClaudeSettings.tsx
+// ../plugins-composer-bar/plugins/agent-claude/src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -222,6 +223,11 @@ function ClaudeSettings({ models = null } = {}) {
         refresh,
         onError: setError
       }),
+      /* @__PURE__ */ jsx(DefaultEffort, {
+        info,
+        refresh,
+        onError: setError
+      }),
       error && /* @__PURE__ */ jsx("p", {
         className: "error",
         children: error
@@ -274,6 +280,54 @@ function ProxyTimeout({
           if (e.key === "Enter")
             e.currentTarget.blur();
         }
+      })
+    ]
+  });
+}
+var EFFORT_NAMES = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max"
+};
+function DefaultEffort({
+  info,
+  refresh,
+  onError
+}) {
+  const pick = async (value) => {
+    const failed = await patchClaudeSettings({ defaultEffort: value ? value : null });
+    onError(failed);
+    await refresh();
+  };
+  return /* @__PURE__ */ jsxs("label", {
+    className: "settings-row",
+    children: [
+      /* @__PURE__ */ jsxs("span", {
+        className: "settings-row-label",
+        children: [
+          "Default effort",
+          /* @__PURE__ */ jsx("span", {
+            className: "settings-row-hint",
+            children: "How hard Claude thinks in the coding agent pane, unless you pick another level there. A level the model does not take is lowered to one it does. Applies to sessions started after the change."
+          })
+        ]
+      }),
+      /* @__PURE__ */ jsxs("select", {
+        "aria-label": "Default Claude effort",
+        value: info.defaultEffort ?? "",
+        onChange: (e) => void pick(e.target.value),
+        children: [
+          /* @__PURE__ */ jsx("option", {
+            value: "",
+            children: "Claude Code's default"
+          }),
+          CLAUDE_EFFORTS.map((e) => /* @__PURE__ */ jsx("option", {
+            value: e,
+            children: EFFORT_NAMES[e]
+          }, e))
+        ]
       })
     ]
   });
@@ -829,7 +883,7 @@ function ClaudeProxy({
   });
 }
 
-// src/client.tsx
+// ../plugins-composer-bar/plugins/agent-claude/src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -857,5 +911,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=055C4FBE3777792764756E2164756E21
+//# debugId=DFCE5613E1FFE8E364756E2164756E21
 //# sourceMappingURL=client.js.map

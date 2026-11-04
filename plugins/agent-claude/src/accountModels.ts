@@ -10,7 +10,7 @@ import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { claudeLaunch } from "./auth";
 import { claudeExecutable } from "./cli";
 import { InputQueue, currentQueryFactory, type QueryFactory } from "./provider";
-import { normalizeDefaultModel, type ClaudeSettingsValues } from "./settings";
+import { CLAUDE_EFFORTS, normalizeDefaultModel, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 /** One row of the account's model menu. */
 export interface AccountModel {
@@ -20,6 +20,17 @@ export interface AccountModel {
   resolvedModel?: string;
   displayName: string;
   description: string;
+  /** The effort levels the model takes; absent when Claude Code does not
+      say, [] when it takes none. */
+  efforts?: ClaudeEffort[];
+}
+
+/** A row's effort levels: none when it says it takes none, its list when
+    it gives one, else not known. */
+function effortsOf(row: Record<string, unknown>): ClaudeEffort[] | undefined {
+  if (row.supportsEffort === false) return [];
+  if (!Array.isArray(row.supportedEffortLevels)) return undefined;
+  return CLAUDE_EFFORTS.filter((e) => (row.supportedEffortLevels as unknown[]).includes(e));
 }
 
 /** How long Claude Code gets to start and answer. */
@@ -36,11 +47,13 @@ export function accountModelsOf(rows: unknown): AccountModel[] {
     const value = normalizeDefaultModel(row?.value);
     if (!value || models.some((m) => m.value === value)) continue;
     const resolved = normalizeDefaultModel(row.resolvedModel);
+    const efforts = effortsOf(row);
     models.push({
       value,
       ...(resolved ? { resolvedModel: resolved } : {}),
       displayName: typeof row.displayName === "string" && row.displayName ? row.displayName : value,
       description: typeof row.description === "string" ? row.description : "",
+      ...(efforts ? { efforts } : {}),
     });
   }
   return models;

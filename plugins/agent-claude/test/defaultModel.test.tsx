@@ -21,7 +21,7 @@ import {
 import { AGENT_MODELS_FILE, listedClaudeModels } from "../src/models";
 import type { QueryLike } from "../src/provider";
 import { DEFAULT_SETTINGS } from "../src/settings";
-import { DefaultModel, accountModelLabel, claudeModelsOf, type ClaudeAuthInfo } from "../src/ui/ClaudeSettings";
+import { DefaultEffort, DefaultModel, accountModelLabel, claudeModelsOf, type ClaudeAuthInfo } from "../src/ui/ClaudeSettings";
 
 const info = (defaultModel: string | null) => ({ defaultModel }) as ClaudeAuthInfo;
 const html = (defaultModel: string | null, models: string[] | null, account: AccountModel[] | null = null) =>
@@ -121,6 +121,32 @@ test("Claude Code's model rows become account models, dropping what is no model 
     { value: "haiku", displayName: "haiku", description: "" },
   ]);
   expect(accountModelsOf(undefined)).toEqual([]);
+});
+
+test("an account model keeps the effort levels Claude Code lists for it", () => {
+  expect(
+    accountModelsOf([
+      { value: "opus", displayName: "Opus", description: "", supportsEffort: true, supportedEffortLevels: ["low", "high", "max", "turbo"] },
+      { value: "haiku", displayName: "Haiku", description: "", supportsEffort: false, supportedEffortLevels: ["low"] },
+      { value: "sonnet", displayName: "Sonnet", description: "" },
+    ]).map((m) => [m.value, m.efforts]),
+  ).toEqual([
+    ["opus", ["low", "high", "max"]],
+    ["haiku", []],
+    ["sonnet", undefined],
+  ]);
+});
+
+test("Default effort is a select of Claude Code's levels, Claude Code's own default when none is set", () => {
+  const effort = (defaultEffort: ClaudeAuthInfo["defaultEffort"]) =>
+    renderToStaticMarkup(<DefaultEffort info={{ defaultEffort } as ClaudeAuthInfo} refresh={async () => {}} onError={() => {}} />);
+  expect(effort(null)).toContain(
+    '<option value="" selected="">Claude Code&#x27;s default</option><option value="low">Low</option><option value="medium">Medium</option>' +
+      '<option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option>',
+  );
+  expect(effort("xhigh")).toContain('<option value="xhigh" selected="">Extra high</option>');
+  // A plugin host from before the setting says nothing: the same as none.
+  expect(effort(undefined)).toContain('<option value="" selected="">');
 });
 
 test("asking for the account's models gives up when Claude Code does not answer in time", async () => {

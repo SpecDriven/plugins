@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { handleApi, reloader } from "@specdriven/app/src/server/api";
 import { createChatSession, endAllChatSessions, getChatEvents } from "@specdriven/app/src/server/agentChat";
+import * as engine from "@specdriven/app/src/server/agentChat";
 import { agents } from "@specdriven/app/src/plugins/host/agents";
 import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentTypes";
 import { createFeature, saveFeature } from "@specdriven/app/src/server/features";
@@ -20,6 +21,7 @@ import { readState, writeState } from "@specdriven/app/src/server/state";
 import {
   InputQueue,
   claudeBaseUrl,
+  createClaudeProvider,
   describeAccount,
   mapSdkMessage,
   setClaudeFirstResponseSeconds,
@@ -41,6 +43,9 @@ class FakeQuery implements QueryLike {
   readonly inputs: SDKUserMessage[] = [];
   interrupts = 0;
   modes: string[] = [];
+  /** What the pane switched mid-session: setModel, applyFlagSettings. */
+  models: (string | undefined)[] = [];
+  flags: Record<string, unknown>[] = [];
   commands: SlashCommandInfo[] = [
     { name: "compact", description: "Compact the conversation", argumentHint: "" },
     { name: "review", description: "Review code", argumentHint: "[files]" },
@@ -78,6 +83,12 @@ class FakeQuery implements QueryLike {
   }
   async setPermissionMode(mode: string) {
     this.modes.push(mode);
+  }
+  async setModel(model?: string) {
+    this.models.push(model);
+  }
+  async applyFlagSettings(settings: Record<string, unknown>) {
+    this.flags.push(settings);
   }
   async supportedCommands() {
     return this.commands;
@@ -1065,6 +1076,103 @@ withChanged("a session carried on under a new sign-in keeps the model it ran on"
   signInChanged();
   const next = await until(async () => fakes.find((f) => f.options.resume === "claude-1"), (f) => f !== undefined);
   expect(next!.options.model).toBe("claude-opus-5");
+});
+
+// The pane's composer bar (specs/agents/claude.feature.md "Pick Claude's
+// model and effort in the pane") needs an app that hands a session a model
+// and effort and switches them mid-session.
+const withBar = test.if("setChatModel" in engine);
+
+withBar("a session starts on the model and effort the pane picked, over the defaults Settings names", async () => {
+  await writeState(
+    { dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "opus", defaultEffort: "low" } }, ...quietProfile(data) },
+    root,
+  );
+  const picked = (await (await api("/api/agent/chat", "POST", { name: "picked", model: "sonnet", effort: "max" })).json()) as ChatSessionMeta;
+  expect(fakes.at(-1)!.options).toMatchObject({ model: "sonnet", effort: "max" });
+  fakes.at(-1)!.emit(init());
+  expect((await untilStatus(picked.id, "idle")).meta.effort).toBe("max");
+
+  const plain = (await (await api("/api/agent/chat", "POST", { name: "plain" })).json()) as ChatSessionMeta;
+  expect(fakes.at(-1)!.options).toMatchObject({ model: "opus", effort: "low" });
+  fakes.at(-1)!.emit(init());
+  // The effort Settings names is the session's, though the pane sent none.
+  expect((await untilStatus(plain.id, "idle")).meta.effort).toBe("low");
+
+  await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true } }, ...quietProfile(data) }, root);
+  expect((await api("/api/agent/chat", "POST", { name: "bare" })).status).toBe(200);
+  expect("effort" in fakes.at(-1)!.options).toBe(false);
+});
+
+withBar("the pane switches a running Claude's model and effort, and the pick becomes Settings → Claude's default", async () => {
+  const { id, fake } = await idleSession();
+  expect((await api(`/api/agent/chat/${id}/model`, "PUT", { model: "haiku" })).status).toBe(200);
+  expect((await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: "xhigh" })).status).toBe(200);
+  expect(fake.models).toEqual(["haiku"]);
+  expect(fake.flags).toEqual([{ effortLevel: "xhigh" }]);
+  expect((await snapshot(id)).meta).toMatchObject({ model: "haiku", effort: "xhigh" });
+  expect((await readState(root)).pluginSettings?.["agent-claude"]).toMatchObject({ defaultModel: "haiku", defaultEffort: "xhigh" });
+  expect((await (await api("/api/claude/settings")).json())).toMatchObject({ defaultModel: "haiku", defaultEffort: "xhigh" });
+  // Back to Claude Code's own: undefined to the SDK, null in Settings.
+  await api(`/api/agent/chat/${id}/model`, "PUT", { model: null });
+  await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: null });
+  expect(fake.models).toEqual(["haiku", undefined]);
+  expect(fake.flags.at(-1)).toEqual({ effortLevel: null });
+  expect((await readState(root)).pluginSettings?.["agent-claude"]).toEqual({ adopted: true });
+});
+
+withBar("the pane's choices are the account's models, else the data repo's, else Claude Code's aliases", async () => {
+  const listed = await (await api("/api/agent/agents/claude/choices")).json();
+  expect(listed.choices).toEqual({
+    models: [
+      { value: "opus", displayName: "Opus", description: "Claude Code's latest Opus" },
+      { value: "sonnet", displayName: "Sonnet", description: "Claude Code's latest Sonnet" },
+      { value: "haiku", displayName: "Haiku", description: "Claude Code's latest Haiku" },
+    ],
+    model: null,
+    effort: null,
+  });
+  await mkdir(join(data, ".specdriven"), { recursive: true });
+  await writeFile(join(data, AGENT_MODELS_FILE), JSON.stringify({ claude: ["claude-sonnet-4-6", "opus"] }));
+  const fromRepo = (await (await api("/api/agent/agents/claude/choices")).json()).choices;
+  expect(fromRepo.models.map((m: { value: string }) => m.value)).toEqual(["claude-sonnet-4-6", "opus"]);
+  expect(fromRepo.model).toBe("claude-sonnet-4-6");
+
+  // A pick before any session: PUT defaults writes Settings → Claude.
+  const saved = await api("/api/agent/agents/claude/defaults", "PUT", { model: "opus", effort: "high" });
+  expect(saved.status).toBe(200);
+  expect((await saved.json()).choices).toMatchObject({ model: "opus", effort: "high" });
+
+  // Signed in with an account: its menu, effort levels and all.
+  const provider = createClaudeProvider({
+    accountModels: async () => [
+      { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", efforts: ["low", "high"] },
+      { value: "haiku", displayName: "Haiku", description: "", efforts: [] },
+    ],
+    listedModels: async () => ["never-shown"],
+  });
+  expect(await provider.choices!({ dataRepo: null })).toEqual({
+    models: [
+      { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", efforts: ["low", "high"] },
+      { value: "haiku", displayName: "Haiku", efforts: [] },
+    ],
+    model: "never-shown",
+    effort: null,
+  });
+  // An account list that fails to come is no list.
+  const failing = createClaudeProvider({ accountModels: async () => Promise.reject(new Error("down")) });
+  expect((await failing.choices!({ dataRepo: null })).models.map((m) => m.value)).toEqual(["opus", "sonnet", "haiku"]);
+  // With nowhere to keep it, a default is refused.
+  await expect(failing.setDefaults!({ model: "opus" })).rejects.toThrow("Claude keeps no defaults here");
+});
+
+test.if("setChatModel" in engine && typeof registry.changed === "function")("a session carried on under a new sign-in keeps the model and effort the pane switched to", async () => {
+  const { id } = await idleSession();
+  await api(`/api/agent/chat/${id}/model`, "PUT", { model: "haiku" });
+  await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: "xhigh" });
+  signInChanged();
+  const next = await until(async () => fakes.find((f) => f.options.resume === "claude-1"), (f) => f !== undefined);
+  expect(next!.options).toMatchObject({ model: "haiku", effort: "xhigh" });
 });
 
 test("the sign-in Settings chose reaches Claude as a --settings override (src/auth.ts)", async () => {
