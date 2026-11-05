@@ -32,7 +32,7 @@ var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, 
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // specdriven-shim:react
-var m, react_default, Activity, Children, Component, Fragment, Profiler, PureComponent, StrictMode, Suspense, act, cache, cacheSignal, captureOwnerStack, cloneElement, createContext, createElement, createRef, forwardRef, isValidElement, lazy, memo, startTransition, unstable_useCacheRefresh, use, useActionState, useCallback, useContext, useDebugValue, useDeferredValue, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useOptimistic, useReducer, useRef, useState, useSyncExternalStore, useTransition, version;
+var m, react_default, Activity, Children, Component, Fragment, Profiler, PureComponent, StrictMode, Suspense, ViewTransition, act, addTransitionType, cache, cacheSignal, captureOwnerStack, cloneElement, createContext, createElement, createRef, forwardRef, isValidElement, lazy, memo, startTransition, unstable_useCacheRefresh, use, useActionState, useCallback, useContext, useDebugValue, useDeferredValue, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useOptimistic, useReducer, useRef, useState, useSyncExternalStore, useTransition, version;
 var init_react = __esm(() => {
   m = globalThis.__specdriven?.modules?.["react"];
   if (!m)
@@ -46,7 +46,9 @@ var init_react = __esm(() => {
   PureComponent = m.PureComponent;
   StrictMode = m.StrictMode;
   Suspense = m.Suspense;
+  ViewTransition = m.ViewTransition;
   act = m.act;
+  addTransitionType = m.addTransitionType;
   cache = m.cache;
   cacheSignal = m.cacheSignal;
   captureOwnerStack = m.captureOwnerStack;
@@ -82,7 +84,7 @@ var init_react = __esm(() => {
   version = m.version;
 });
 
-// ../../../../plugins/plugins/models/node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js
+// node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js
 var require_use_sync_external_store_shim_production = __commonJS((exports) => {
   init_react();
   function is(x, y) {
@@ -126,14 +128,14 @@ var require_use_sync_external_store_shim_production = __commonJS((exports) => {
   exports.useSyncExternalStore = useSyncExternalStore !== undefined ? useSyncExternalStore : shim;
 });
 
-// ../../../../plugins/plugins/models/node_modules/use-sync-external-store/shim/index.js
+// node_modules/use-sync-external-store/shim/index.js
 var require_shim = __commonJS((exports, module) => {
   if (true) {
     module.exports = require_use_sync_external_store_shim_production();
   }
 });
 
-// ../../../../plugins/plugins/models/node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js
+// node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js
 var require_with_selector_production = __commonJS((exports) => {
   init_react();
   var shim = require_shim();
@@ -195,22 +197,22 @@ var require_with_selector_production = __commonJS((exports) => {
   };
 });
 
-// ../../../../plugins/plugins/models/node_modules/use-sync-external-store/shim/with-selector.js
+// node_modules/use-sync-external-store/shim/with-selector.js
 var require_with_selector = __commonJS((exports, module) => {
   if (true) {
     module.exports = require_with_selector_production();
   }
 });
 
-// ../../../../plugins/plugins/models/src/client.tsx
+// src/client.tsx
 init_react();
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/createLucideIcon.mjs
+// node_modules/lucide-react/dist/esm/createLucideIcon.mjs
 init_react();
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/utils/toKebabCase.mjs
+// node_modules/lucide-react/dist/esm/shared/src/utils/toKebabCase.mjs
 var toKebabCase = (string) => string?.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/utils/toLucideIconData.mjs
+// node_modules/lucide-react/dist/esm/shared/src/utils/toLucideIconData.mjs
 function toLucideIconData(iconName, iconNode, aliases = []) {
   if (iconNode == null) {
     throw new Error("[lucide]: iconNode is required when icon name is used");
@@ -223,7 +225,7 @@ function toLucideIconData(iconName, iconNode, aliases = []) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/utils/toCamelCase.mjs
+// node_modules/lucide-react/dist/esm/shared/src/utils/toCamelCase.mjs
 var toCamelCase = (string) => {
   let out = "";
   let upperNext = false;
@@ -242,21 +244,21 @@ var toCamelCase = (string) => {
   return out;
 };
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/utils/toPascalCase.mjs
+// node_modules/lucide-react/dist/esm/shared/src/utils/toPascalCase.mjs
 var toPascalCase = (string) => {
   const camelCase = toCamelCase(string);
   return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
 };
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/Icon.mjs
+// node_modules/lucide-react/dist/esm/Icon.mjs
 init_react();
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/utils/mergeClasses.mjs
+// node_modules/lucide-react/dist/esm/shared/src/utils/mergeClasses.mjs
 var mergeClasses = (...classes) => classes.filter((className, index, array) => {
   return Boolean(className) && className.trim() !== "" && array.indexOf(className) === index;
 }).join(" ").trim();
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/build/defaultAttributes.mjs
+// node_modules/lucide-react/dist/esm/shared/src/build/defaultAttributes.mjs
 var defaultAttributes = {
   xmlns: "http://www.w3.org/2000/svg",
   width: 24,
@@ -269,7 +271,7 @@ var defaultAttributes = {
   "stroke-linejoin": "round"
 };
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/build/buildLucideIconNode.mjs
+// node_modules/lucide-react/dist/esm/shared/src/build/buildLucideIconNode.mjs
 function isDefined(value) {
   return value !== null && value !== undefined;
 }
@@ -322,7 +324,7 @@ function buildLucideIconNode(icon, params = {}) {
   ];
 }
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/build/buildLucideIconForReact.mjs
+// node_modules/lucide-react/dist/esm/shared/src/build/buildLucideIconForReact.mjs
 function buildLucideIconForReact(icon, params = {}) {
   return buildLucideIconNode(icon, {
     ...params,
@@ -337,7 +339,7 @@ function buildLucideIconForReact(icon, params = {}) {
   });
 }
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/shared/src/utils/hasA11yProp.mjs
+// node_modules/lucide-react/dist/esm/shared/src/utils/hasA11yProp.mjs
 var hasA11yProp = (props) => {
   for (const prop in props) {
     if (prop.startsWith("aria-") || prop === "role" || prop === "title") {
@@ -347,13 +349,13 @@ var hasA11yProp = (props) => {
   return false;
 };
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/context.mjs
+// node_modules/lucide-react/dist/esm/context.mjs
 init_react();
 "use client";
 var LucideContext = createContext({});
 var useLucideContext = () => useContext(LucideContext);
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/Icon.mjs
+// node_modules/lucide-react/dist/esm/Icon.mjs
 "use client";
 var Icon = forwardRef(({
   color,
@@ -402,7 +404,7 @@ var Icon = forwardRef(({
   ]);
 });
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/createLucideIcon.mjs
+// node_modules/lucide-react/dist/esm/createLucideIcon.mjs
 function createLucideIcon(iconDataOrName, iconNode = [], aliases = []) {
   const iconData = typeof iconDataOrName === "string" ? toLucideIconData(iconDataOrName, iconNode, aliases) : iconDataOrName;
   const Component2 = forwardRef(({ className, ...props }, ref) => createElement(Icon, {
@@ -417,7 +419,7 @@ function createLucideIcon(iconDataOrName, iconNode = [], aliases = []) {
   return Component2;
 }
 
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/ellipsis.mjs
+// node_modules/lucide-react/dist/esm/icons/ellipsis.mjs
 var __iconData = {
   name: "ellipsis",
   size: 24,
@@ -430,7 +432,7 @@ var __iconData = {
 };
 __iconData.node;
 var Ellipsis = createLucideIcon(__iconData);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/file-braces.mjs
+// node_modules/lucide-react/dist/esm/icons/file-braces.mjs
 var __iconData2 = {
   name: "file-braces",
   size: 24,
@@ -456,7 +458,7 @@ var __iconData2 = {
 };
 __iconData2.node;
 var FileBraces = createLucideIcon(__iconData2);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/file-plus-corner.mjs
+// node_modules/lucide-react/dist/esm/icons/file-plus-corner.mjs
 var __iconData3 = {
   name: "file-plus-corner",
   size: 24,
@@ -476,7 +478,7 @@ var __iconData3 = {
 };
 __iconData3.node;
 var FilePlusCorner = createLucideIcon(__iconData3);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/trash.mjs
+// node_modules/lucide-react/dist/esm/icons/trash.mjs
 var __iconData4 = {
   name: "trash",
   size: 24,
@@ -491,7 +493,7 @@ var __iconData4 = {
 };
 __iconData4.node;
 var Trash = createLucideIcon(__iconData4);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/user-round.mjs
+// node_modules/lucide-react/dist/esm/icons/user-round.mjs
 var __iconData5 = {
   name: "user-round",
   size: 24,
@@ -503,7 +505,7 @@ var __iconData5 = {
 };
 __iconData5.node;
 var UserRound = createLucideIcon(__iconData5);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/arrow-left.mjs
+// node_modules/lucide-react/dist/esm/icons/arrow-left.mjs
 var __iconData6 = {
   name: "arrow-left",
   size: 24,
@@ -514,7 +516,7 @@ var __iconData6 = {
 };
 __iconData6.node;
 var ArrowLeft = createLucideIcon(__iconData6);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/arrow-right.mjs
+// node_modules/lucide-react/dist/esm/icons/arrow-right.mjs
 var __iconData7 = {
   name: "arrow-right",
   size: 24,
@@ -525,7 +527,7 @@ var __iconData7 = {
 };
 __iconData7.node;
 var ArrowRight = createLucideIcon(__iconData7);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/check.mjs
+// node_modules/lucide-react/dist/esm/icons/check.mjs
 var __iconData8 = {
   name: "check",
   size: 24,
@@ -533,7 +535,7 @@ var __iconData8 = {
 };
 __iconData8.node;
 var Check = createLucideIcon(__iconData8);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/download.mjs
+// node_modules/lucide-react/dist/esm/icons/download.mjs
 var __iconData9 = {
   name: "download",
   size: 24,
@@ -545,7 +547,7 @@ var __iconData9 = {
 };
 __iconData9.node;
 var Download = createLucideIcon(__iconData9);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/external-link.mjs
+// node_modules/lucide-react/dist/esm/icons/external-link.mjs
 var __iconData10 = {
   name: "external-link",
   size: 24,
@@ -557,7 +559,7 @@ var __iconData10 = {
 };
 __iconData10.node;
 var ExternalLink = createLucideIcon(__iconData10);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/layout-grid.mjs
+// node_modules/lucide-react/dist/esm/icons/layout-grid.mjs
 var __iconData11 = {
   name: "layout-grid",
   size: 24,
@@ -570,7 +572,7 @@ var __iconData11 = {
 };
 __iconData11.node;
 var LayoutGrid = createLucideIcon(__iconData11);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/link.mjs
+// node_modules/lucide-react/dist/esm/icons/link.mjs
 var __iconData12 = {
   name: "link",
   size: 24,
@@ -581,7 +583,7 @@ var __iconData12 = {
 };
 __iconData12.node;
 var Link = createLucideIcon(__iconData12);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/play.mjs
+// node_modules/lucide-react/dist/esm/icons/play.mjs
 var __iconData13 = {
   name: "play",
   size: 24,
@@ -597,7 +599,7 @@ var __iconData13 = {
 };
 __iconData13.node;
 var Play = createLucideIcon(__iconData13);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/plus.mjs
+// node_modules/lucide-react/dist/esm/icons/plus.mjs
 var __iconData14 = {
   name: "plus",
   size: 24,
@@ -608,7 +610,7 @@ var __iconData14 = {
 };
 __iconData14.node;
 var Plus = createLucideIcon(__iconData14);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/upload.mjs
+// node_modules/lucide-react/dist/esm/icons/upload.mjs
 var __iconData15 = {
   name: "upload",
   size: 24,
@@ -620,7 +622,7 @@ var __iconData15 = {
 };
 __iconData15.node;
 var Upload = createLucideIcon(__iconData15);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/workflow.mjs
+// node_modules/lucide-react/dist/esm/icons/workflow.mjs
 var __iconData16 = {
   name: "workflow",
   size: 24,
@@ -632,7 +634,7 @@ var __iconData16 = {
 };
 __iconData16.node;
 var Workflow = createLucideIcon(__iconData16);
-// ../../../../plugins/plugins/models/node_modules/lucide-react/dist/esm/icons/x.mjs
+// node_modules/lucide-react/dist/esm/icons/x.mjs
 var __iconData17 = {
   name: "x",
   size: 24,
@@ -649,6 +651,7 @@ if (!m2)
   throw new Error("SpecDriven did not publish @specdriven/client for plugins");
 var client_default = m2.default ?? m2;
 var Breadcrumbs = m2.Breadcrumbs;
+var CORE_SETTINGS_ORDER = m2.CORE_SETTINGS_ORDER;
 var Menu = m2.Menu;
 var PageSkeleton = m2.PageSkeleton;
 var SaveIndicator = m2.SaveIndicator;
@@ -659,7 +662,7 @@ var markText = m2.markText;
 var slugify = m2.slugify;
 var toast = m2.toast;
 
-// ../../../../plugins/plugins/models/node_modules/@xyflow/react/dist/base.css
+// node_modules/@xyflow/react/dist/base.css
 var base_default = `/* this will be exported as base.css and can be used for a basic styling */
 /* these are the necessary styles for React/Svelte Flow, they get used by base.css and style.css */
 .react-flow {
@@ -1167,7 +1170,7 @@ svg.react-flow__connectionline {
 }
 `;
 
-// ../../../../plugins/plugins/models/src/ui/models.css
+// src/ui/models.css
 var models_default = `/* ---- Event Models (roadmap/support-event-modeling.md) ----
    The Models tab's canvas: swimlanes across, slice bands down, cards in the
    cells. Card colours are the cheat sheet's, as tokens so both themes read
@@ -1779,10 +1782,10 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// ../../../../plugins/plugins/models/node_modules/@xyflow/react/dist/esm/index.js
+// node_modules/@xyflow/react/dist/esm/index.js
 init_react();
 
-// ../../../../plugins/plugins/models/node_modules/classcat/index.js
+// node_modules/classcat/index.js
 function cc(names) {
   if (typeof names === "string" || typeof names === "number")
     return "" + names;
@@ -1802,7 +1805,7 @@ function cc(names) {
   return out;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-dispatch/src/dispatch.js
+// node_modules/d3-dispatch/src/dispatch.js
 var noop = { value: () => {} };
 function dispatch() {
   for (var i = 0, n = arguments.length, _ = {}, t;i < n; ++i) {
@@ -1887,7 +1890,7 @@ function set(type, name, callback) {
   return type;
 }
 var dispatch_default = dispatch;
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/matcher.js
+// node_modules/d3-selection/src/matcher.js
 function matcher_default(selector) {
   return function() {
     return this.matches(selector);
@@ -1898,7 +1901,7 @@ function childMatcher(selector) {
     return node.matches(selector);
   };
 }
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/namespaces.js
+// node_modules/d3-selection/src/namespaces.js
 var xhtml = "http://www.w3.org/1999/xhtml";
 var namespaces_default = {
   svg: "http://www.w3.org/2000/svg",
@@ -1908,14 +1911,14 @@ var namespaces_default = {
   xmlns: "http://www.w3.org/2000/xmlns/"
 };
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/namespace.js
+// node_modules/d3-selection/src/namespace.js
 function namespace_default(name) {
   var prefix = name += "", i = prefix.indexOf(":");
   if (i >= 0 && (prefix = name.slice(0, i)) !== "xmlns")
     name = name.slice(i + 1);
   return namespaces_default.hasOwnProperty(prefix) ? { space: namespaces_default[prefix], local: name } : name;
 }
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/sourceEvent.js
+// node_modules/d3-selection/src/sourceEvent.js
 function sourceEvent_default(event) {
   let sourceEvent;
   while (sourceEvent = event.sourceEvent)
@@ -1923,7 +1926,7 @@ function sourceEvent_default(event) {
   return event;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/pointer.js
+// node_modules/d3-selection/src/pointer.js
 function pointer_default(event, node) {
   event = sourceEvent_default(event);
   if (node === undefined)
@@ -1943,7 +1946,7 @@ function pointer_default(event, node) {
   }
   return [event.pageX, event.pageY];
 }
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selector.js
+// node_modules/d3-selection/src/selector.js
 function none() {}
 function selector_default(selector) {
   return selector == null ? none : function() {
@@ -1951,7 +1954,7 @@ function selector_default(selector) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/select.js
+// node_modules/d3-selection/src/selection/select.js
 function select_default(select) {
   if (typeof select !== "function")
     select = selector_default(select);
@@ -1967,12 +1970,12 @@ function select_default(select) {
   return new Selection(subgroups, this._parents);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/array.js
+// node_modules/d3-selection/src/array.js
 function array(x) {
   return x == null ? [] : Array.isArray(x) ? x : Array.from(x);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selectorAll.js
+// node_modules/d3-selection/src/selectorAll.js
 function empty() {
   return [];
 }
@@ -1982,7 +1985,7 @@ function selectorAll_default(selector) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/selectAll.js
+// node_modules/d3-selection/src/selection/selectAll.js
 function arrayAll(select) {
   return function() {
     return array(select.apply(this, arguments));
@@ -2004,7 +2007,7 @@ function selectAll_default(select) {
   return new Selection(subgroups, parents);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/selectChild.js
+// node_modules/d3-selection/src/selection/selectChild.js
 var find = Array.prototype.find;
 function childFind(match) {
   return function() {
@@ -2018,7 +2021,7 @@ function selectChild_default(match) {
   return this.select(match == null ? childFirst : childFind(typeof match === "function" ? match : childMatcher(match)));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/selectChildren.js
+// node_modules/d3-selection/src/selection/selectChildren.js
 var filter = Array.prototype.filter;
 function children() {
   return Array.from(this.children);
@@ -2032,7 +2035,7 @@ function selectChildren_default(match) {
   return this.selectAll(match == null ? children : childrenFilter(typeof match === "function" ? match : childMatcher(match)));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/filter.js
+// node_modules/d3-selection/src/selection/filter.js
 function filter_default(match) {
   if (typeof match !== "function")
     match = matcher_default(match);
@@ -2046,12 +2049,12 @@ function filter_default(match) {
   return new Selection(subgroups, this._parents);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/sparse.js
+// node_modules/d3-selection/src/selection/sparse.js
 function sparse_default(update) {
   return new Array(update.length);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/enter.js
+// node_modules/d3-selection/src/selection/enter.js
 function enter_default() {
   return new Selection(this._enter || this._groups.map(sparse_default), this._parents);
 }
@@ -2078,14 +2081,14 @@ EnterNode.prototype = {
   }
 };
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/constant.js
+// node_modules/d3-selection/src/constant.js
 function constant_default(x) {
   return function() {
     return x;
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/data.js
+// node_modules/d3-selection/src/selection/data.js
 function bindIndex(parent, group, enter, update, exit, data) {
   var i = 0, node, groupLength = group.length, dataLength = data.length;
   for (;i < dataLength; ++i) {
@@ -2161,12 +2164,12 @@ function arraylike(data) {
   return typeof data === "object" && "length" in data ? data : Array.from(data);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/exit.js
+// node_modules/d3-selection/src/selection/exit.js
 function exit_default() {
   return new Selection(this._exit || this._groups.map(sparse_default), this._parents);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/join.js
+// node_modules/d3-selection/src/selection/join.js
 function join_default(onenter, onupdate, onexit) {
   var enter = this.enter(), update = this, exit = this.exit();
   if (typeof onenter === "function") {
@@ -2188,7 +2191,7 @@ function join_default(onenter, onupdate, onexit) {
   return enter && update ? enter.merge(update).order() : update;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/merge.js
+// node_modules/d3-selection/src/selection/merge.js
 function merge_default(context) {
   var selection = context.selection ? context.selection() : context;
   for (var groups0 = this._groups, groups1 = selection._groups, m0 = groups0.length, m1 = groups1.length, m4 = Math.min(m0, m1), merges = new Array(m0), j = 0;j < m4; ++j) {
@@ -2204,7 +2207,7 @@ function merge_default(context) {
   return new Selection(merges, this._parents);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/order.js
+// node_modules/d3-selection/src/selection/order.js
 function order_default() {
   for (var groups = this._groups, j = -1, m4 = groups.length;++j < m4; ) {
     for (var group = groups[j], i = group.length - 1, next = group[i], node;--i >= 0; ) {
@@ -2218,7 +2221,7 @@ function order_default() {
   return this;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/sort.js
+// node_modules/d3-selection/src/selection/sort.js
 function sort_default(compare) {
   if (!compare)
     compare = ascending;
@@ -2239,7 +2242,7 @@ function ascending(a, b) {
   return a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/call.js
+// node_modules/d3-selection/src/selection/call.js
 function call_default() {
   var callback = arguments[0];
   arguments[0] = this;
@@ -2247,12 +2250,12 @@ function call_default() {
   return this;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/nodes.js
+// node_modules/d3-selection/src/selection/nodes.js
 function nodes_default() {
   return Array.from(this);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/node.js
+// node_modules/d3-selection/src/selection/node.js
 function node_default() {
   for (var groups = this._groups, j = 0, m4 = groups.length;j < m4; ++j) {
     for (var group = groups[j], i = 0, n = group.length;i < n; ++i) {
@@ -2264,7 +2267,7 @@ function node_default() {
   return null;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/size.js
+// node_modules/d3-selection/src/selection/size.js
 function size_default() {
   let size = 0;
   for (const node of this)
@@ -2272,12 +2275,12 @@ function size_default() {
   return size;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/empty.js
+// node_modules/d3-selection/src/selection/empty.js
 function empty_default() {
   return !this.node();
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/each.js
+// node_modules/d3-selection/src/selection/each.js
 function each_default(callback) {
   for (var groups = this._groups, j = 0, m4 = groups.length;j < m4; ++j) {
     for (var group = groups[j], i = 0, n = group.length, node;i < n; ++i) {
@@ -2288,7 +2291,7 @@ function each_default(callback) {
   return this;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/attr.js
+// node_modules/d3-selection/src/selection/attr.js
 function attrRemove(name) {
   return function() {
     this.removeAttribute(name);
@@ -2336,12 +2339,12 @@ function attr_default(name, value) {
   return this.each((value == null ? fullname.local ? attrRemoveNS : attrRemove : typeof value === "function" ? fullname.local ? attrFunctionNS : attrFunction : fullname.local ? attrConstantNS : attrConstant)(fullname, value));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/window.js
+// node_modules/d3-selection/src/window.js
 function window_default(node) {
   return node.ownerDocument && node.ownerDocument.defaultView || node.document && node || node.defaultView;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/style.js
+// node_modules/d3-selection/src/selection/style.js
 function styleRemove(name) {
   return function() {
     this.style.removeProperty(name);
@@ -2368,7 +2371,7 @@ function styleValue(node, name) {
   return node.style.getPropertyValue(name) || window_default(node).getComputedStyle(node, null).getPropertyValue(name);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/property.js
+// node_modules/d3-selection/src/selection/property.js
 function propertyRemove(name) {
   return function() {
     delete this[name];
@@ -2392,7 +2395,7 @@ function property_default(name, value) {
   return arguments.length > 1 ? this.each((value == null ? propertyRemove : typeof value === "function" ? propertyFunction : propertyConstant)(name, value)) : this.node()[name];
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/classed.js
+// node_modules/d3-selection/src/selection/classed.js
 function classArray(string) {
   return string.trim().split(/^|\s+/);
 }
@@ -2459,7 +2462,7 @@ function classed_default(name, value) {
   return this.each((typeof value === "function" ? classedFunction : value ? classedTrue : classedFalse)(names, value));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/text.js
+// node_modules/d3-selection/src/selection/text.js
 function textRemove() {
   this.textContent = "";
 }
@@ -2478,7 +2481,7 @@ function text_default(value) {
   return arguments.length ? this.each(value == null ? textRemove : (typeof value === "function" ? textFunction : textConstant)(value)) : this.node().textContent;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/html.js
+// node_modules/d3-selection/src/selection/html.js
 function htmlRemove() {
   this.innerHTML = "";
 }
@@ -2497,7 +2500,7 @@ function html_default(value) {
   return arguments.length ? this.each(value == null ? htmlRemove : (typeof value === "function" ? htmlFunction : htmlConstant)(value)) : this.node().innerHTML;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/raise.js
+// node_modules/d3-selection/src/selection/raise.js
 function raise() {
   if (this.nextSibling)
     this.parentNode.appendChild(this);
@@ -2506,7 +2509,7 @@ function raise_default() {
   return this.each(raise);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/lower.js
+// node_modules/d3-selection/src/selection/lower.js
 function lower() {
   if (this.previousSibling)
     this.parentNode.insertBefore(this, this.parentNode.firstChild);
@@ -2515,7 +2518,7 @@ function lower_default() {
   return this.each(lower);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/creator.js
+// node_modules/d3-selection/src/creator.js
 function creatorInherit(name) {
   return function() {
     var document2 = this.ownerDocument, uri = this.namespaceURI;
@@ -2532,7 +2535,7 @@ function creator_default(name) {
   return (fullname.local ? creatorFixed : creatorInherit)(fullname);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/append.js
+// node_modules/d3-selection/src/selection/append.js
 function append_default(name) {
   var create = typeof name === "function" ? name : creator_default(name);
   return this.select(function() {
@@ -2540,7 +2543,7 @@ function append_default(name) {
   });
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/insert.js
+// node_modules/d3-selection/src/selection/insert.js
 function constantNull() {
   return null;
 }
@@ -2551,7 +2554,7 @@ function insert_default(name, before) {
   });
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/remove.js
+// node_modules/d3-selection/src/selection/remove.js
 function remove() {
   var parent = this.parentNode;
   if (parent)
@@ -2561,7 +2564,7 @@ function remove_default() {
   return this.each(remove);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/clone.js
+// node_modules/d3-selection/src/selection/clone.js
 function selection_cloneShallow() {
   var clone = this.cloneNode(false), parent = this.parentNode;
   return parent ? parent.insertBefore(clone, this.nextSibling) : clone;
@@ -2574,12 +2577,12 @@ function clone_default(deep) {
   return this.select(deep ? selection_cloneDeep : selection_cloneShallow);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/datum.js
+// node_modules/d3-selection/src/selection/datum.js
 function datum_default(value) {
   return arguments.length ? this.property("__data__", value) : this.node().__data__;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/on.js
+// node_modules/d3-selection/src/selection/on.js
 function contextListener(listener) {
   return function(event) {
     listener.call(this, event, this.__data__);
@@ -2651,7 +2654,7 @@ function on_default(typename, value, options) {
   return this;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/dispatch.js
+// node_modules/d3-selection/src/selection/dispatch.js
 function dispatchEvent(node, type, params) {
   var window2 = window_default(node), event = window2.CustomEvent;
   if (typeof event === "function") {
@@ -2679,7 +2682,7 @@ function dispatch_default2(type, params) {
   return this.each((typeof params === "function" ? dispatchFunction : dispatchConstant)(type, params));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/iterator.js
+// node_modules/d3-selection/src/selection/iterator.js
 function* iterator_default() {
   for (var groups = this._groups, j = 0, m4 = groups.length;j < m4; ++j) {
     for (var group = groups[j], i = 0, n = group.length, node;i < n; ++i) {
@@ -2689,7 +2692,7 @@ function* iterator_default() {
   }
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/selection/index.js
+// node_modules/d3-selection/src/selection/index.js
 var root = [null];
 function Selection(groups, parents) {
   this._groups = groups;
@@ -2741,11 +2744,11 @@ Selection.prototype = selection.prototype = {
 };
 var selection_default = selection;
 
-// ../../../../plugins/plugins/models/node_modules/d3-selection/src/select.js
+// node_modules/d3-selection/src/select.js
 function select_default2(selector) {
   return typeof selector === "string" ? new Selection([[document.querySelector(selector)]], [document.documentElement]) : new Selection([[selector]], root);
 }
-// ../../../../plugins/plugins/models/node_modules/d3-drag/src/noevent.js
+// node_modules/d3-drag/src/noevent.js
 var nonpassive = { passive: false };
 var nonpassivecapture = { capture: true, passive: false };
 function nopropagation(event) {
@@ -2756,7 +2759,7 @@ function noevent_default(event) {
   event.stopImmediatePropagation();
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-drag/src/nodrag.js
+// node_modules/d3-drag/src/nodrag.js
 function nodrag_default(view) {
   var root2 = view.document.documentElement, selection2 = select_default2(view).on("dragstart.drag", noevent_default, nonpassivecapture);
   if ("onselectstart" in root2) {
@@ -2782,10 +2785,10 @@ function yesdrag(view, noclick) {
   }
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-drag/src/constant.js
+// node_modules/d3-drag/src/constant.js
 var constant_default2 = (x) => () => x;
 
-// ../../../../plugins/plugins/models/node_modules/d3-drag/src/event.js
+// node_modules/d3-drag/src/event.js
 function DragEvent(type, {
   sourceEvent,
   subject,
@@ -2817,7 +2820,7 @@ DragEvent.prototype.on = function() {
   return value === this._ ? this : value;
 };
 
-// ../../../../plugins/plugins/models/node_modules/d3-drag/src/drag.js
+// node_modules/d3-drag/src/drag.js
 function defaultFilter(event) {
   return !event.ctrlKey && !event.button;
 }
@@ -2960,7 +2963,7 @@ function drag_default() {
   };
   return drag;
 }
-// ../../../../plugins/plugins/models/node_modules/d3-color/src/define.js
+// node_modules/d3-color/src/define.js
 function define_default(constructor, factory, prototype) {
   constructor.prototype = factory.prototype = prototype;
   prototype.constructor = constructor;
@@ -2972,7 +2975,7 @@ function extend(parent, definition) {
   return prototype;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-color/src/color.js
+// node_modules/d3-color/src/color.js
 function Color() {}
 var darker = 0.7;
 var brighter = 1 / darker;
@@ -3313,7 +3316,7 @@ function clampt(value) {
 function hsl2rgb(h, m1, m22) {
   return (h < 60 ? m1 + (m22 - m1) * h / 60 : h < 180 ? m22 : h < 240 ? m1 + (m22 - m1) * (240 - h) / 60 : m1) * 255;
 }
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/basis.js
+// node_modules/d3-interpolate/src/basis.js
 function basis(t1, v0, v1, v2, v3) {
   var t2 = t1 * t1, t3 = t2 * t1;
   return ((1 - 3 * t1 + 3 * t2 - t3) * v0 + (4 - 6 * t2 + 3 * t3) * v1 + (1 + 3 * t1 + 3 * t2 - 3 * t3) * v2 + t3 * v3) / 6;
@@ -3326,7 +3329,7 @@ function basis_default(values) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/basisClosed.js
+// node_modules/d3-interpolate/src/basisClosed.js
 function basisClosed_default(values) {
   var n = values.length;
   return function(t) {
@@ -3335,10 +3338,10 @@ function basisClosed_default(values) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/constant.js
+// node_modules/d3-interpolate/src/constant.js
 var constant_default3 = (x) => () => x;
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/color.js
+// node_modules/d3-interpolate/src/color.js
 function linear(a, d) {
   return function(t) {
     return a + t * d;
@@ -3359,7 +3362,7 @@ function nogamma(a, b) {
   return d ? linear(a, d) : constant_default3(isNaN(a) ? b : a);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/rgb.js
+// node_modules/d3-interpolate/src/rgb.js
 var rgb_default = function rgbGamma(y) {
   var color2 = gamma(y);
   function rgb2(start, end) {
@@ -3399,7 +3402,7 @@ function rgbSpline(spline) {
 var rgbBasis = rgbSpline(basis_default);
 var rgbBasisClosed = rgbSpline(basisClosed_default);
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/numberArray.js
+// node_modules/d3-interpolate/src/numberArray.js
 function numberArray_default(a, b) {
   if (!b)
     b = [];
@@ -3414,7 +3417,7 @@ function isNumberArray(x) {
   return ArrayBuffer.isView(x) && !(x instanceof DataView);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/array.js
+// node_modules/d3-interpolate/src/array.js
 function genericArray(a, b) {
   var nb = b ? b.length : 0, na = a ? Math.min(nb, a.length) : 0, x = new Array(na), c = new Array(nb), i;
   for (i = 0;i < na; ++i)
@@ -3428,7 +3431,7 @@ function genericArray(a, b) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/date.js
+// node_modules/d3-interpolate/src/date.js
 function date_default(a, b) {
   var d = new Date;
   return a = +a, b = +b, function(t) {
@@ -3436,14 +3439,14 @@ function date_default(a, b) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/number.js
+// node_modules/d3-interpolate/src/number.js
 function number_default(a, b) {
   return a = +a, b = +b, function(t) {
     return a * (1 - t) + b * t;
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/object.js
+// node_modules/d3-interpolate/src/object.js
 function object_default(a, b) {
   var i = {}, c = {}, k;
   if (a === null || typeof a !== "object")
@@ -3464,7 +3467,7 @@ function object_default(a, b) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/string.js
+// node_modules/d3-interpolate/src/string.js
 var reA = /[-+]?(?:\d+\.?\d*|\.?\d+)(?:[eE][-+]?\d+)?/g;
 var reB = new RegExp(reA.source, "g");
 function zero(b) {
@@ -3513,12 +3516,12 @@ function string_default(a, b) {
   });
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/value.js
+// node_modules/d3-interpolate/src/value.js
 function value_default(a, b) {
   var t = typeof b, c;
   return b == null || t === "boolean" ? constant_default3(b) : (t === "number" ? number_default : t === "string" ? (c = color(b)) ? (b = c, rgb_default) : string_default : b instanceof color ? rgb_default : b instanceof Date ? date_default : isNumberArray(b) ? numberArray_default : Array.isArray(b) ? genericArray : typeof b.valueOf !== "function" && typeof b.toString !== "function" || isNaN(b) ? object_default : number_default)(a, b);
 }
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/transform/decompose.js
+// node_modules/d3-interpolate/src/transform/decompose.js
 var degrees = 180 / Math.PI;
 var identity = {
   translateX: 0,
@@ -3548,7 +3551,7 @@ function decompose_default(a, b, c, d, e, f) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/transform/parse.js
+// node_modules/d3-interpolate/src/transform/parse.js
 var svgNode;
 function parseCss(value) {
   const m4 = new (typeof DOMMatrix === "function" ? DOMMatrix : WebKitCSSMatrix)(value + "");
@@ -3566,7 +3569,7 @@ function parseSvg(value) {
   return decompose_default(value.a, value.b, value.c, value.d, value.e, value.f);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/transform/index.js
+// node_modules/d3-interpolate/src/transform/index.js
 function interpolateTransform(parse, pxComma, pxParen, degParen) {
   function pop(s) {
     return s.length ? s.pop() + " " : "";
@@ -3623,7 +3626,7 @@ function interpolateTransform(parse, pxComma, pxParen, degParen) {
 }
 var interpolateTransformCss = interpolateTransform(parseCss, "px, ", "px)", "deg)");
 var interpolateTransformSvg = interpolateTransform(parseSvg, ", ", ")", ")");
-// ../../../../plugins/plugins/models/node_modules/d3-interpolate/src/zoom.js
+// node_modules/d3-interpolate/src/zoom.js
 var epsilon2 = 0.000000000001;
 function cosh(x) {
   return ((x = Math.exp(x)) + 1 / x) / 2;
@@ -3667,7 +3670,7 @@ var zoom_default = function zoomRho(rho, rho2, rho4) {
   };
   return zoom;
 }(Math.SQRT2, 2, 4);
-// ../../../../plugins/plugins/models/node_modules/d3-timer/src/timer.js
+// node_modules/d3-timer/src/timer.js
 var frame = 0;
 var timeout = 0;
 var interval = 0;
@@ -3779,7 +3782,7 @@ function sleep(time) {
     frame = 1, setFrame(wake);
   }
 }
-// ../../../../plugins/plugins/models/node_modules/d3-timer/src/timeout.js
+// node_modules/d3-timer/src/timeout.js
 function timeout_default(callback, delay, time) {
   var t = new Timer;
   delay = delay == null ? 0 : +delay;
@@ -3789,7 +3792,7 @@ function timeout_default(callback, delay, time) {
   }, delay, time);
   return t;
 }
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/schedule.js
+// node_modules/d3-transition/src/transition/schedule.js
 var emptyOn = dispatch_default("start", "end", "cancel", "interrupt");
 var emptyTween = [];
 var CREATED = 0;
@@ -3909,7 +3912,7 @@ function create(node, id, self) {
   }
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/interrupt.js
+// node_modules/d3-transition/src/interrupt.js
 function interrupt_default(node, name) {
   var schedules = node.__transition, schedule, active, empty2 = true, i;
   if (!schedules)
@@ -3930,14 +3933,14 @@ function interrupt_default(node, name) {
     delete node.__transition;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/selection/interrupt.js
+// node_modules/d3-transition/src/selection/interrupt.js
 function interrupt_default2(name) {
   return this.each(function() {
     interrupt_default(this, name);
   });
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/tween.js
+// node_modules/d3-transition/src/transition/tween.js
 function tweenRemove(id, name) {
   var tween0, tween1;
   return function() {
@@ -4000,13 +4003,13 @@ function tweenValue(transition, name, value) {
   };
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/interpolate.js
+// node_modules/d3-transition/src/transition/interpolate.js
 function interpolate_default(a, b) {
   var c;
   return (typeof b === "number" ? number_default : b instanceof color ? rgb_default : (c = color(b)) ? (b = c, rgb_default) : string_default)(a, b);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/attr.js
+// node_modules/d3-transition/src/transition/attr.js
 function attrRemove2(name) {
   return function() {
     this.removeAttribute(name);
@@ -4058,7 +4061,7 @@ function attr_default2(name, value) {
   return this.attrTween(name, typeof value === "function" ? (fullname.local ? attrFunctionNS2 : attrFunction2)(fullname, i, tweenValue(this, "attr." + name, value)) : value == null ? (fullname.local ? attrRemoveNS2 : attrRemove2)(fullname) : (fullname.local ? attrConstantNS2 : attrConstant2)(fullname, i, value));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/attrTween.js
+// node_modules/d3-transition/src/transition/attrTween.js
 function attrInterpolate(name, i) {
   return function(t) {
     this.setAttribute(name, i.call(this, t));
@@ -4103,7 +4106,7 @@ function attrTween_default(name, value) {
   return this.tween(key, (fullname.local ? attrTweenNS : attrTween)(fullname, value));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/delay.js
+// node_modules/d3-transition/src/transition/delay.js
 function delayFunction(id, value) {
   return function() {
     init(this, id).delay = +value.apply(this, arguments);
@@ -4119,7 +4122,7 @@ function delay_default(value) {
   return arguments.length ? this.each((typeof value === "function" ? delayFunction : delayConstant)(id, value)) : get2(this.node(), id).delay;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/duration.js
+// node_modules/d3-transition/src/transition/duration.js
 function durationFunction(id, value) {
   return function() {
     set2(this, id).duration = +value.apply(this, arguments);
@@ -4135,7 +4138,7 @@ function duration_default(value) {
   return arguments.length ? this.each((typeof value === "function" ? durationFunction : durationConstant)(id, value)) : get2(this.node(), id).duration;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/ease.js
+// node_modules/d3-transition/src/transition/ease.js
 function easeConstant(id, value) {
   if (typeof value !== "function")
     throw new Error;
@@ -4148,7 +4151,7 @@ function ease_default(value) {
   return arguments.length ? this.each(easeConstant(id, value)) : get2(this.node(), id).ease;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/easeVarying.js
+// node_modules/d3-transition/src/transition/easeVarying.js
 function easeVarying(id, value) {
   return function() {
     var v = value.apply(this, arguments);
@@ -4163,7 +4166,7 @@ function easeVarying_default(value) {
   return this.each(easeVarying(this._id, value));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/filter.js
+// node_modules/d3-transition/src/transition/filter.js
 function filter_default2(match) {
   if (typeof match !== "function")
     match = matcher_default(match);
@@ -4177,7 +4180,7 @@ function filter_default2(match) {
   return new Transition(subgroups, this._parents, this._name, this._id);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/merge.js
+// node_modules/d3-transition/src/transition/merge.js
 function merge_default2(transition) {
   if (transition._id !== this._id)
     throw new Error;
@@ -4194,7 +4197,7 @@ function merge_default2(transition) {
   return new Transition(merges, this._parents, this._name, this._id);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/on.js
+// node_modules/d3-transition/src/transition/on.js
 function start(name) {
   return (name + "").trim().split(/^|\s+/).every(function(t) {
     var i = t.indexOf(".");
@@ -4217,7 +4220,7 @@ function on_default2(name, listener) {
   return arguments.length < 2 ? get2(this.node(), id).on.on(name) : this.each(onFunction(id, name, listener));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/remove.js
+// node_modules/d3-transition/src/transition/remove.js
 function removeFunction(id) {
   return function() {
     var parent = this.parentNode;
@@ -4232,7 +4235,7 @@ function remove_default2() {
   return this.on("end.remove", removeFunction(this._id));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/select.js
+// node_modules/d3-transition/src/transition/select.js
 function select_default3(select) {
   var name = this._name, id = this._id;
   if (typeof select !== "function")
@@ -4250,7 +4253,7 @@ function select_default3(select) {
   return new Transition(subgroups, this._parents, name, id);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/selectAll.js
+// node_modules/d3-transition/src/transition/selectAll.js
 function selectAll_default2(select) {
   var name = this._name, id = this._id;
   if (typeof select !== "function")
@@ -4271,13 +4274,13 @@ function selectAll_default2(select) {
   return new Transition(subgroups, parents, name, id);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/selection.js
+// node_modules/d3-transition/src/transition/selection.js
 var Selection2 = selection_default.prototype.constructor;
 function selection_default2() {
   return new Selection2(this._groups, this._parents);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/style.js
+// node_modules/d3-transition/src/transition/style.js
 function styleNull(name, interpolate) {
   var string00, string10, interpolate0;
   return function() {
@@ -4320,7 +4323,7 @@ function style_default2(name, value, priority) {
   return value == null ? this.styleTween(name, styleNull(name, i)).on("end.style." + name, styleRemove2(name)) : typeof value === "function" ? this.styleTween(name, styleFunction2(name, i, tweenValue(this, "style." + name, value))).each(styleMaybeRemove(this._id, name)) : this.styleTween(name, styleConstant2(name, i, value), priority).on("end.style." + name, null);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/styleTween.js
+// node_modules/d3-transition/src/transition/styleTween.js
 function styleInterpolate(name, i, priority) {
   return function(t) {
     this.style.setProperty(name, i.call(this, t), priority);
@@ -4348,7 +4351,7 @@ function styleTween_default(name, value, priority) {
   return this.tween(key, styleTween(name, value, priority == null ? "" : priority));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/text.js
+// node_modules/d3-transition/src/transition/text.js
 function textConstant2(value) {
   return function() {
     this.textContent = value;
@@ -4364,7 +4367,7 @@ function text_default2(value) {
   return this.tween("text", typeof value === "function" ? textFunction2(tweenValue(this, "text", value)) : textConstant2(value == null ? "" : value + ""));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/textTween.js
+// node_modules/d3-transition/src/transition/textTween.js
 function textInterpolate(i) {
   return function(t) {
     this.textContent = i.call(this, t);
@@ -4392,7 +4395,7 @@ function textTween_default(value) {
   return this.tween(key, textTween(value));
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/transition.js
+// node_modules/d3-transition/src/transition/transition.js
 function transition_default() {
   var name = this._name, id0 = this._id, id1 = newId();
   for (var groups = this._groups, m4 = groups.length, j = 0;j < m4; ++j) {
@@ -4411,7 +4414,7 @@ function transition_default() {
   return new Transition(groups, this._parents, name, id1);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/end.js
+// node_modules/d3-transition/src/transition/end.js
 function end_default() {
   var on0, on1, that = this, id = that._id, size = that.size();
   return new Promise(function(resolve, reject) {
@@ -4434,7 +4437,7 @@ function end_default() {
   });
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/transition/index.js
+// node_modules/d3-transition/src/transition/index.js
 var id = 0;
 function Transition(groups, parents, name, id2) {
   this._groups = groups;
@@ -4481,11 +4484,11 @@ Transition.prototype = transition.prototype = {
   end: end_default,
   [Symbol.iterator]: selection_prototype[Symbol.iterator]
 };
-// ../../../../plugins/plugins/models/node_modules/d3-ease/src/cubic.js
+// node_modules/d3-ease/src/cubic.js
 function cubicInOut(t) {
   return ((t *= 2) <= 1 ? t * t * t : (t -= 2) * t * t + 2) / 2;
 }
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/selection/transition.js
+// node_modules/d3-transition/src/selection/transition.js
 var defaultTiming = {
   time: null,
   delay: 0,
@@ -4518,13 +4521,13 @@ function transition_default2(name) {
   return new Transition(groups, this._parents, name, id2);
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-transition/src/selection/index.js
+// node_modules/d3-transition/src/selection/index.js
 selection_default.prototype.interrupt = interrupt_default2;
 selection_default.prototype.transition = transition_default2;
-// ../../../../plugins/plugins/models/node_modules/d3-zoom/src/constant.js
+// node_modules/d3-zoom/src/constant.js
 var constant_default4 = (x) => () => x;
 
-// ../../../../plugins/plugins/models/node_modules/d3-zoom/src/event.js
+// node_modules/d3-zoom/src/event.js
 function ZoomEvent(type, {
   sourceEvent,
   target,
@@ -4540,7 +4543,7 @@ function ZoomEvent(type, {
   });
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-zoom/src/transform.js
+// node_modules/d3-zoom/src/transform.js
 function Transform(k, x, y) {
   this.k = k;
   this.x = x;
@@ -4591,7 +4594,7 @@ function transform(node) {
   return node.__zoom;
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-zoom/src/noevent.js
+// node_modules/d3-zoom/src/noevent.js
 function nopropagation2(event) {
   event.stopImmediatePropagation();
 }
@@ -4600,7 +4603,7 @@ function noevent_default2(event) {
   event.stopImmediatePropagation();
 }
 
-// ../../../../plugins/plugins/models/node_modules/d3-zoom/src/zoom.js
+// node_modules/d3-zoom/src/zoom.js
 function defaultFilter2(event) {
   return (!event.ctrlKey || event.type === "wheel") && !event.button;
 }
@@ -4928,7 +4931,7 @@ function zoom_default2() {
   };
   return zoom;
 }
-// ../../../../plugins/plugins/models/node_modules/@xyflow/system/dist/esm/index.js
+// node_modules/@xyflow/system/dist/esm/index.js
 var errorMessages = {
   error001: (lib = "react") => `Seems like you have not used ${lib === "svelte" ? "SvelteFlowProvider" : "ReactFlowProvider"} as an ancestor. Help: https://${lib}flow.dev/error#001`,
   error002: () => "It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them.",
@@ -7579,11 +7582,11 @@ function XYResizer({ domNode, nodeId, getStoreItems, onChange, onEnd }) {
     destroy
   };
 }
-// ../../../../plugins/plugins/models/node_modules/zustand/esm/traditional.mjs
+// node_modules/zustand/esm/traditional.mjs
 init_react();
 var import_with_selector = __toESM(require_with_selector(), 1);
 
-// ../../../../plugins/plugins/models/node_modules/zustand/esm/vanilla.mjs
+// node_modules/zustand/esm/vanilla.mjs
 var createStoreImpl = (createState) => {
   let state;
   const listeners = /* @__PURE__ */ new Set;
@@ -7613,7 +7616,7 @@ var createStoreImpl = (createState) => {
 };
 var createStore = (createState) => createState ? createStoreImpl(createState) : createStoreImpl;
 
-// ../../../../plugins/plugins/models/node_modules/zustand/esm/traditional.mjs
+// node_modules/zustand/esm/traditional.mjs
 var { useDebugValue: useDebugValue2 } = react_default;
 var { useSyncExternalStoreWithSelector } = import_with_selector.default;
 var identity3 = (arg) => arg;
@@ -7630,7 +7633,7 @@ var createWithEqualityFnImpl = (createState, defaultEqualityFn) => {
 };
 var createWithEqualityFn = (createState, defaultEqualityFn) => createState ? createWithEqualityFnImpl(createState, defaultEqualityFn) : createWithEqualityFnImpl;
 
-// ../../../../plugins/plugins/models/node_modules/zustand/esm/shallow.mjs
+// node_modules/zustand/esm/shallow.mjs
 function shallow$1(objA, objB) {
   if (Object.is(objA, objB)) {
     return true;
@@ -7675,6 +7678,7 @@ var m4 = globalThis.__specdriven?.modules?.["react-dom"];
 if (!m4)
   throw new Error("SpecDriven did not publish react-dom for plugins");
 var react_dom_default = m4.default ?? m4;
+var browser = m4.browser;
 var createPortal = m4.createPortal;
 var flushSync = m4.flushSync;
 var preconnect = m4.preconnect;
@@ -7689,7 +7693,7 @@ var useFormState = m4.useFormState;
 var useFormStatus = m4.useFormStatus;
 var version2 = m4.version;
 
-// ../../../../plugins/plugins/models/node_modules/@xyflow/react/dist/esm/index.js
+// node_modules/@xyflow/react/dist/esm/index.js
 "use client";
 var StoreContext = createContext(null);
 var Provider$1 = StoreContext.Provider;
@@ -10893,10 +10897,10 @@ function ResizeControl({ nodeId, position, variant = ResizeControlVariant.Handle
 }
 var NodeResizeControl = memo(ResizeControl);
 
-// ../../../../plugins/plugins/models/src/ui/ModelsPane.tsx
+// src/ui/ModelsPane.tsx
 init_react();
 
-// ../../../../plugins/plugins/models/src/model/types.ts
+// src/model/types.ts
 var ELEMENT_TYPES = [
   "SCREEN",
   "COMMAND",
@@ -10983,7 +10987,7 @@ function inferSliceType(slice) {
   return null;
 }
 
-// ../../../../plugins/plugins/models/src/model/serialize.ts
+// src/model/serialize.ts
 var KEY_ORDER = [
   "format",
   "name",
@@ -11045,7 +11049,7 @@ function serializeModelFile(file) {
 `;
 }
 
-// ../../../../plugins/plugins/models/src/route.ts
+// src/route.ts
 var MODELS_FOLDER = "models";
 function decode(segment) {
   try {
@@ -11071,7 +11075,7 @@ function modelsPath(view) {
   return view.fileName ? modelLink(view.fileName) : `/${MODELS_FOLDER}`;
 }
 
-// ../../../../plugins/plugins/models/src/model/layout.ts
+// src/model/layout.ts
 function defaultLane(layout, element) {
   const kind = laneKindOf(element.type);
   if (element.type === "EVENT" && element.aggregate) {
@@ -11168,7 +11172,7 @@ function autoLayout(model, layout, all = false) {
   return next;
 }
 
-// ../../../../plugins/plugins/models/src/ui/mutations.ts
+// src/ui/mutations.ts
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -11577,7 +11581,7 @@ function setAssigned(file, assigned) {
   return next;
 }
 
-// ../../../../plugins/plugins/models/src/ui/Inspector.tsx
+// src/ui/Inspector.tsx
 var SLICE_TYPE_LABEL = {
   STATE_CHANGE: "State change",
   STATE_VIEW: "State view",
@@ -12315,11 +12319,11 @@ function LanePanel({ file, lane, onChange, onDeselect, confirm }) {
   });
 }
 
-// ../../../../plugins/plugins/models/src/ui/context.ts
+// src/ui/context.ts
 init_react();
 var SliceActionsContext = createContext({ openFeature: () => {} });
 
-// ../../../../plugins/plugins/models/src/ui/geometry.ts
+// src/ui/geometry.ts
 var LANE_HEADER_W = 170;
 var SLICE_HEADER_H = 40;
 var COL_W = 230;
@@ -12378,7 +12382,7 @@ function dropTarget(model, layout, x, y) {
   return { sliceId: last.id, lane, column: col - start2 };
 }
 
-// ../../../../plugins/plugins/models/src/ui/flow.ts
+// src/ui/flow.ts
 var elementNodeId = (id2) => `el:${id2}`;
 var sliceNodeId = (id2) => `slice:${id2}`;
 var laneNodeId = (id2) => `lane:${id2}`;
@@ -12476,7 +12480,7 @@ function edgeEnds(edgeId) {
   return { from: edgeId.slice(0, at), to: edgeId.slice(at + 2) };
 }
 
-// ../../../../plugins/plugins/models/src/ui/models.ts
+// src/ui/models.ts
 init_react();
 var EMPTY_MODELS = { models: [], loaded: false, error: null };
 var state = EMPTY_MODELS;
@@ -12557,7 +12561,7 @@ function modelExportUrl(fileName) {
   return `/api/models/${encodeURIComponent(fileName)}/export`;
 }
 
-// ../../../../plugins/plugins/models/src/ui/nodes.tsx
+// src/ui/nodes.tsx
 init_react();
 var SLICE_TYPE_LABEL2 = {
   STATE_CHANGE: "State change",
@@ -12699,7 +12703,7 @@ var nodeTypes = {
   lane: memo(LaneNodeView)
 };
 
-// ../../../../plugins/plugins/models/src/ui/ModelsPane.tsx
+// src/ui/ModelsPane.tsx
 function spaClick(e, go) {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
     return;
@@ -13581,7 +13585,7 @@ function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink, onClos
   });
 }
 
-// ../../../../plugins/plugins/models/src/client.tsx
+// src/client.tsx
 var reloadKey = 0;
 var reloadListeners = new Set;
 var subscribeReload = (l) => {
@@ -13729,5 +13733,5 @@ export {
   client_default2 as default
 };
 
-//# debugId=3922A6CED47DAFF564756E2164756E21
+//# debugId=E4CBD47083E2C42764756E2164756E21
 //# sourceMappingURL=client.js.map
