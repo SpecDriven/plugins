@@ -125,8 +125,11 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
   const [account, setAccount] = useState<AccountModel[] | null>(null);
 
   // Signed in with a Claude account: the models it offers, asked afresh
-  // whenever the account changes.
+  // whenever the account changes, and again once a sign-in is done — the
+  // same account signing in again still gets a fresh list.
   const accountKey = info?.mode === "login" && info.login.loggedIn ? (info.login.email ?? "") : null;
+  const [modelsAsk, setModelsAsk] = useState(0);
+  const reloadModels = () => setModelsAsk((n) => n + 1);
   useEffect(() => {
     setAccount(null);
     if (accountKey === null) return;
@@ -137,7 +140,7 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
     return () => {
       live = false;
     };
-  }, [accountKey]);
+  }, [accountKey, modelsAsk]);
 
   const refresh = async () => {
     const next = await fetchClaudeAuth();
@@ -173,7 +176,7 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
         </select>
       </label>
       {info.mode === "login" ? (
-        <ClaudeAccount info={info} onChange={setInfo} refresh={refresh} />
+        <ClaudeAccount info={info} onChange={setInfo} refresh={refresh} reloadModels={reloadModels} onModels={setAccount} />
       ) : (
         <ClaudeProxy info={info} refresh={refresh} onError={setError} />
       )}
@@ -429,27 +432,51 @@ export function accountModelLabel(model: AccountModel, account: AccountModel[]):
   return name && name !== model.value ? `${name} — ${model.value}` : model.value;
 }
 
-/** The Claude account: who is signed in, the email sign-in, sign out. */
-function ClaudeAccount({
+/** What "Check sign-in" found, in a sentence. */
+export function signInCheckText(login: ClaudeAuthInfo["login"], models: AccountModel[], error: string | null): string {
+  if (!login.loggedIn) return "Not signed in — the Claude CLI has no account. Sign in below.";
+  if (login.method === "api_key") return "Signed in with an API key, not a Claude account — sign in below.";
+  const who = login.email ? `Signed in as ${login.email}` : "Signed in to a Claude account";
+  if (error) return `${who}, but Claude Code could not list the account's models: ${error}`;
+  if (models.length === 0) return `${who}, but Claude Code listed no models for the account.`;
+  return `${who} — Claude Code started under the account and lists ${models.length} model${models.length === 1 ? "" : "s"}.`;
+}
+
+/**
+ * The Claude account: who is signed in, or plainly that nobody is; the email
+ * sign-in; "Check sign-in", which asks the CLI afresh and proves the account
+ * by starting a Claude Code under it; sign out. Another account takes a
+ * sign-out first.
+ */
+export function ClaudeAccount({
   info,
   onChange,
   refresh,
+  reloadModels,
+  onModels,
 }: {
   info: ClaudeAuthInfo;
   onChange: (info: ClaudeAuthInfo) => void;
   refresh: () => Promise<void>;
+  /** Have "Default model" ask for the account's models again. */
+  reloadModels: () => void;
+  /** The account's models as "Check sign-in" just listed them; null for none. */
+  onModels: (models: AccountModel[] | null) => void;
 }) {
   const [email, setEmail] = useState(info.login.email ?? "");
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [check, setCheck] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const signIn = info.signIn;
   const inProgress = signIn?.inProgress ?? false;
   /** The sign-in page already opened, so a poll that brings it opens it once. */
   const opened = useRef<string | null>(null);
+  const signedIn = info.login.loggedIn && info.login.method !== "api_key";
 
   // While the browser sign-in is under way, ask the server every couple of
-  // seconds whether it came back.
+  // seconds whether it came back; once it has, the account's models are
+  // asked for again.
   useEffect(() => {
     if (!inProgress) return;
     let live = true;
@@ -464,7 +491,10 @@ function ClaudeAccount({
           opened.current = next.url;
           window.open(next.url, "_blank", "noopener");
         }
-      } else await refresh();
+      } else {
+        await refresh();
+        if (next?.done) reloadModels();
+      }
     };
     const timer = setInterval(() => void tick(), signIn?.download ? 500 : 2000);
     return () => {
@@ -476,6 +506,7 @@ function ClaudeAccount({
   const start = async () => {
     setBusy(true);
     setStatus(null);
+    setCheck(null);
     const result = await call<{ signIn: ClaudeSignIn }>("POST", "/api/claude/login", { email: email.trim() });
     setBusy(false);
     if (!result.ok) return setStatus(result.error);
@@ -499,19 +530,48 @@ function ClaudeAccount({
   const signOut = async () => {
     setBusy(true);
     setStatus(null);
+    setCheck(null);
     const result = await call("POST", "/api/claude/logout");
     setBusy(false);
     if (!result.ok) return setStatus(result.error);
     await refresh();
+    setCheck("Signed out.");
+  };
+  const checkSignIn = async () => {
+    setBusy(true);
+    setStatus(null);
+    setCheck("Checking — asking the Claude CLI, then starting a Claude Code under the account…");
+    const result = await call<{ login: ClaudeAuthInfo["login"]; models: AccountModel[]; error: string | null }>(
+      "POST",
+      "/api/claude/login/check",
+    );
+    setBusy(false);
+    if (!result.ok) {
+      setCheck(null);
+      return setStatus(result.error);
+    }
+    const { login, models, error } = result.data;
+    onChange({ ...info, login });
+    onModels(models.length > 0 ? models : null);
+    setCheck(signInCheckText(login, models, error));
   };
 
-  const who = info.login.loggedIn
-    ? info.login.method === "api_key"
-      ? "Signed in with an API key, not a Claude account — sessions in this mode set it aside, so sign in below."
-      : info.login.email
-        ? "Signed in"
-        : "Signed in to a Claude account"
-    : "Not signed in";
+  const who = !info.login.loggedIn ? (
+    <>
+      <strong>Not signed in.</strong> Enter the email of your Claude account to sign in through the browser.
+    </>
+  ) : info.login.method === "api_key" ? (
+    <>
+      <strong>Signed in with an API key, not a Claude account</strong> — sessions in this mode set it aside, so sign in
+      below.
+    </>
+  ) : info.login.email ? (
+    <>
+      Signed in as <strong>{info.login.email}</strong>.
+    </>
+  ) : (
+    <>Signed in to a Claude account.</>
+  );
 
   return (
     <div className="settings-row auth-section">
@@ -524,15 +584,8 @@ function ClaudeAccount({
           downloads it first (about 90 MB, once).
         </p>
       ) : (
-        <p className="hint">
+        <p className="hint" role="status">
           {who}
-          {info.login.loggedIn && info.login.email && info.login.method !== "api_key" ? (
-            <>
-              {" "}
-              as <strong>{info.login.email}</strong>
-            </>
-          ) : null}
-          {info.login.loggedIn && info.login.method !== "api_key" ? "." : info.login.loggedIn ? "" : " — enter the email of your Claude account to sign in through the browser."}
         </p>
       )}
       {inProgress && signIn?.download ? (
@@ -589,6 +642,15 @@ function ClaudeAccount({
             </button>
           </div>
         </>
+      ) : signedIn ? (
+        <div className="auth-row">
+          <button className="secondary" disabled={busy} onClick={() => void checkSignIn()}>
+            Check sign-in
+          </button>
+          <button className="secondary" disabled={busy} onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
       ) : (
         (info.cliAvailable || info.canFetchClaude) && (
           <div className="auth-row">
@@ -604,15 +666,20 @@ function ClaudeAccount({
               placeholder="you@example.com"
             />
             <button className="secondary" disabled={busy || !email.trim()} onClick={() => void start()}>
-              {info.login.loggedIn && info.login.method !== "api_key" ? "Switch account…" : "Sign in…"}
+              Sign in
             </button>
-            {info.login.loggedIn && info.login.method !== "api_key" && (
-              <button className="secondary" disabled={busy} onClick={() => void signOut()}>
-                Sign out
+            {info.cliAvailable && (
+              <button className="secondary" disabled={busy} onClick={() => void checkSignIn()}>
+                Check sign-in
               </button>
             )}
           </div>
         )
+      )}
+      {check && !inProgress && (
+        <p className="hint" role="status">
+          {check}
+        </p>
       )}
       {signIn?.error && !inProgress && <p className="error">{signIn.error}</p>}
       {status && <p className="error">{status}</p>}

@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../plugins-composer-bar/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// ../plugins-composer-bar/plugins/agent-claude/src/host.ts
+// src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44539,6 +44539,7 @@ if (!m)
 var host_default = m.default ?? m;
 var A = m.A;
 var AgentError = m.AgentError;
+var EFFORT_LEVELS = m.EFFORT_LEVELS;
 var HOSTED_REFUSAL = m.HOSTED_REFUSAL;
 var agents = m.agents;
 var commitAndPush = m.commitAndPush;
@@ -44555,6 +44556,8 @@ var jsonlReader = m.jsonlReader;
 var listFileDocs = m.listFileDocs;
 var loadFileDoc = m.loadFileDoc;
 var newFileDoc = m.newFileDoc;
+var normalizeEffort = m.normalizeEffort;
+var normalizeModel = m.normalizeModel;
 var normalizePermissionMode = m.normalizePermissionMode;
 var readTextFile = m.readTextFile;
 var removeAndPush = m.removeAndPush;
@@ -44568,20 +44571,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../plugins-composer-bar/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// ../plugins-composer-bar/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// ../plugins-composer-bar/plugins/agent-claude/src/binaries.json
+// src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44596,7 +44599,7 @@ var binaries_default = {
   }
 };
 
-// ../plugins-composer-bar/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44724,7 +44727,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/cli.ts
+// src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44736,7 +44739,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44843,7 +44846,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 class ClaudeAuthError extends Error {
   status;
   constructor(message, status) {
@@ -45182,7 +45185,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/provider.ts
+// src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45856,7 +45859,7 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/accountModels.ts
+// src/accountModels.ts
 function effortsOf(row) {
   if (row.supportsEffort === false)
     return [];
@@ -45940,7 +45943,7 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/models.ts
+// src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
@@ -45958,7 +45961,7 @@ async function listedClaudeModels(dataDir) {
   }
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/host.ts
+// src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -46115,6 +46118,17 @@ var plugin = {
       }
       return answer();
     };
+    const postLoginCheck = async () => {
+      const login = await loginStatus();
+      if (!login.loggedIn || login.method === "api_key")
+        return json({ login, models: [], error: null });
+      forgetAccountModels();
+      try {
+        return json({ login, models: await signedInAccountModels(), error: null });
+      } catch (e) {
+        return json({ login, models: [], error: e.message });
+      }
+    };
     const getModels = async () => {
       try {
         return json({ models: await signedInAccountModels() });
@@ -46143,6 +46157,7 @@ var plugin = {
     add("POST", "/api/claude/login/code", postLoginCode);
     add("DELETE", "/api/claude/login", deleteLogin);
     add("POST", "/api/claude/logout", postLogout);
+    add("POST", "/api/claude/login/check", postLoginCheck);
     add("GET", "/api/claude/models", getModels);
     add("GET", "/api/claude/settings", getSettings);
     add("PUT", "/api/claude/settings", putSettings);
@@ -46155,5 +46170,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=BE8349058D163AC264756E2164756E21
+//# debugId=6D6BFDC13E58456964756E2164756E21
 //# sourceMappingURL=host.js.map
