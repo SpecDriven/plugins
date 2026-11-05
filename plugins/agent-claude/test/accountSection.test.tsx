@@ -31,8 +31,8 @@ test("signed in, the section names the account and offers Check sign-in and Sign
   expect(out).not.toContain('aria-label="Claude account email"');
   expect(buttons(out)).toEqual(["Check sign-in", "Sign out"]);
   expect(out).not.toContain("Switch account");
-  // An account the CLI names no email for is still signed in.
-  expect(html({ loggedIn: true, method: "oauth_token", email: null })).toContain("Signed in to a Claude account.");
+  // A token in the environment is a sign-in too, with no account to name.
+  expect(html({ loggedIn: true, method: "oauth_token", email: null })).toContain("Signed in with a token Claude Code found in its environment.");
 });
 
 test("an API key is not an account: the section says so and asks for a sign-in", () => {
@@ -63,4 +63,11 @@ test("the check's finding is one sentence: the account, and whether Claude Code 
     "Not signed in — the Claude CLI has no account. Sign in below.",
   );
   expect(signInCheckText({ loggedIn: true, method: "api_key", email: null }, [], null)).toContain("API key");
+  // What the Claude Code started under the account found comes first: no
+  // account, token or key is "Not signed in", whatever the CLI said.
+  const nobody = { billing: "none", label: "Not logged in", detail: "" } as const;
+  expect(signInCheckText(ada, [], null, nobody)).toBe(
+    "Not signed in — the Claude Code started under the account found no account, token or key. Sign in below.",
+  );
+  expect(signInCheckText(ada, models, null, { billing: "plan", label: "Claude Max", detail: "" })).toContain("lists 2 models.");
 });

@@ -158,7 +158,15 @@ test("asking for the account's models gives up when Claude Code does not answer 
   expect(hung).toBe("Claude Code did not list its models in time");
   expect(aborted!.signal.aborted).toBe(true);
   // A Claude Code too old to list them lists none.
-  expect(await fetchAccountModels(DEFAULT_SETTINGS, process.cwd(), null, () => ({}) as QueryLike)).toEqual([]);
+  expect(await fetchAccountModels(DEFAULT_SETTINGS, process.cwd(), null, () => ({}) as QueryLike)).toEqual({ account: null, models: [] });
+  // One that found no account, token or key lists none either, and is not
+  // asked for them (specs/agents/claude.feature.md "Sign in to Claude with an email").
+  let listed = 0;
+  const nobody = await fetchAccountModels({ ...DEFAULT_SETTINGS, claudeAuth: "login" }, process.cwd(), null, () =>
+    ({ accountInfo: async () => ({ tokenSource: "none", apiProvider: "firstParty" }), supportedModels: async () => (listed++, [{ value: "opus", displayName: "Opus", description: "" }]) }) as unknown as QueryLike,
+  );
+  expect(nobody).toMatchObject({ account: { billing: "none" }, models: [] });
+  expect(listed).toBe(0);
 });
 
 test("the account's models are asked for once, shared, and again after the TTL or a sign-in change", async () => {
@@ -166,14 +174,14 @@ test("the account's models are asked for once, shared, and again after the TTL o
   let asks = 0;
   const ask = async () => {
     asks++;
-    return [{ value: `m${asks}`, displayName: "", description: "" }];
+    return { account: null, models: [{ value: `m${asks}`, displayName: "", description: "" }] };
   };
   const [a, b] = await Promise.all([accountModels(ask), accountModels(ask)]);
   expect(a).toEqual(b);
   expect(asks).toBe(1);
-  expect((await accountModels(ask))[0]!.value).toBe("m1");
-  expect((await accountModels(ask, Date.now() + ACCOUNT_MODELS_TTL_MS + 1))[0]!.value).toBe("m2");
+  expect((await accountModels(ask)).models[0]!.value).toBe("m1");
+  expect((await accountModels(ask, Date.now() + ACCOUNT_MODELS_TTL_MS + 1)).models[0]!.value).toBe("m2");
   forgetAccountModels();
-  expect((await accountModels(ask))[0]!.value).toBe("m3");
+  expect((await accountModels(ask)).models[0]!.value).toBe("m3");
   forgetAccountModels();
 });

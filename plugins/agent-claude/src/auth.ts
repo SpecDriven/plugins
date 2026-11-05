@@ -154,17 +154,19 @@ export interface ClaudeLaunch {
   apiBaseUrl: string | undefined;
 }
 
+/** The `--settings` of the account sign-in: the claude.ai login and nothing
+    else — a proxy or key the settings files or environment carry would
+    pre-empt it, and an empty string here clears each. */
+export const LOGIN_SETTINGS = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" } });
+
 /** The launch for a settled sign-in — pure, so a test can check it. */
 export function launchFor(auth: EffectiveClaudeAuth, env: Env = process.env): ClaudeLaunch {
   const processEnv = claudeProcessEnv(env);
   if (auth.mode === "login") {
-    // The claude.ai login and nothing else: a proxy or key the settings
-    // files or environment carry would pre-empt it.
     delete processEnv.ANTHROPIC_BASE_URL;
     delete processEnv.ANTHROPIC_AUTH_TOKEN;
     delete processEnv.ANTHROPIC_API_KEY;
-    const settings = { env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" } };
-    return { mode: "login", env: processEnv, extraArgs: { settings: JSON.stringify(settings) }, apiBaseUrl: undefined };
+    return { mode: "login", env: processEnv, extraArgs: { settings: LOGIN_SETTINGS }, apiBaseUrl: undefined };
   }
   if (!auth.proxy) {
     // Proxy mode with no url anywhere: Claude Code is left to its own config.
@@ -197,7 +199,8 @@ export async function claudeLaunch(
 
 export interface LoginStatus {
   loggedIn: boolean;
-  /** Claude Code's authMethod: "claude.ai", "api_key", "none"; "missing"
+  /** Claude Code's authMethod: "claude.ai", "api_key", "oauth_token" (a
+      token in the environment, CLAUDE_CODE_OAUTH_TOKEN), "none"; "missing"
       without a CLI, "unknown" when its answer made no sense. */
   method: string;
   email: string | null;
@@ -223,34 +226,22 @@ export function parseLoginStatus(stdout: string): LoginStatus {
 export async function loginStatus(runner: Runner = run): Promise<LoginStatus> {
   const claude = claudeExecutable();
   if (!claude) return { loggedIn: false, method: "missing", email: null };
-  // The account alone: a key in the environment would read as a login,
-  // and the account sign-in sets it aside anyway (launchFor). The CLI's
-  // `auth status` takes no --settings, so a key in a settings file still
-  // shows — as "api_key", which the page explains.
+  // The account as every Claude the app starts sees it: `auth status`
+  // counts a key in the environment as a login and a bearer token in a
+  // settings file as an "oauth_token" one, while the account sign-in sets
+  // both aside (launchFor) — so the CLI is asked with the same --settings,
+  // a global flag that comes before the subcommand, and no key in its
+  // environment. A real claude.ai login still answers with its email; a
+  // CLAUDE_CODE_OAUTH_TOKEN in the environment, which sessions do use,
+  // still answers "oauth_token". The email is the CLI's to name: the
+  // profile in its global config may be another Claude's (the desktop
+  // app's), so it is not read.
   const env = claudeProcessEnv();
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
-  const result = await runner(claude, ["auth", "status", "--json"], { env });
+  const result = await runner(claude, ["--settings", LOGIN_SETTINGS, "auth", "status", "--json"], { env });
   if (result.exitCode !== 0 && !result.stdout.trim()) return { loggedIn: false, method: "unknown", email: null };
-  const status = parseLoginStatus(result.stdout);
-  // A bearer token in a settings file makes `auth status` answer
-  // "oauth_token" with no account named; the account Claude Code signed in
-  // to is still on record in its global config.
-  if (status.loggedIn && !status.email && status.method !== "api_key") status.email = await accountEmail(env);
-  return status;
-}
-
-/** The email of the claude.ai account in Claude Code's global config —
-    `.claude.json` in CLAUDE_CONFIG_DIR, else in the home folder. */
-export async function accountEmail(env: Env = process.env): Promise<string | null> {
-  const file = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(homedir(), ".claude.json");
-  try {
-    const parsed = JSON.parse(await readFile(file, "utf8")) as { oauthAccount?: { emailAddress?: unknown } } | null;
-    const email = parsed?.oauthAccount?.emailAddress;
-    return typeof email === "string" && email ? email : null;
-  } catch {
-    return null;
-  }
+  return parseLoginStatus(result.stdout);
 }
 
 /** A sign-in started from Settings, as the page polls it. */

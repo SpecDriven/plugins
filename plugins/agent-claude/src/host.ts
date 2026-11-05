@@ -25,7 +25,8 @@ import {
   submitLoginCode,
 } from "./auth";
 import type { EffectiveClaudeAuth, LoginStatus } from "./auth";
-import { accountModels, fetchAccountModels, forgetAccountModels } from "./accountModels";
+import { NO_ACCOUNT, accountModels, fetchAccountModels, forgetAccountModels } from "./accountModels";
+import type { AccountProbe } from "./accountModels";
 import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
 import { listedClaudeModels } from "./models";
@@ -150,16 +151,18 @@ const plugin: Plugin<Context, HostConfig> = {
       }
     };
 
-    /** The models the signed-in Claude account offers, for Settings →
-        Claude's Default model and the pane's model menu; none behind a
-        proxy or with no one signed in. */
-    const signedInAccountModels = async () => {
+    /** The signed-in Claude account as a Claude Code started under it
+        reports it, with the models it offers, for Settings → Claude's
+        Default model and the pane's model menu; neither behind a proxy or
+        with no one signed in. */
+    const signedInAccount = async (): Promise<AccountProbe> => {
       const own = await settings();
       const cwd = await claudeCwd();
       const token = await storedToken(secrets);
-      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login") return [];
-      return accountModels(async () => ((await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : []));
+      if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login") return NO_ACCOUNT;
+      return accountModels(async () => ((await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : NO_ACCOUNT));
     };
+    const signedInAccountModels = async () => (await signedInAccount()).models;
 
     const answer = async (): Promise<Response> => {
       const own = await settings();
@@ -247,14 +250,18 @@ const plugin: Plugin<Context, HostConfig> = {
     // answer, and the list "Default model" shows from then on. A Claude
     // Code that cannot answer is reported, not an error: the sign-in may
     // still be fine.
+    // What that Claude Code found is the proof: `account` is the account
+    // it runs as (null when it was not started or did not say), "none"
+    // when it found no account, token or key whatever the CLI said.
     const postLoginCheck: Handler = async () => {
       const login = await loginStatus();
-      if (!login.loggedIn || login.method === "api_key") return json({ login, models: [], error: null });
+      if (!login.loggedIn || login.method === "api_key") return json({ login, models: [], error: null, account: null });
       forgetAccountModels();
       try {
-        return json({ login, models: await signedInAccountModels(), error: null });
+        const { account, models } = await signedInAccount();
+        return json({ login, models, error: null, account });
       } catch (e) {
-        return json({ login, models: [], error: (e as Error).message });
+        return json({ login, models: [], error: (e as Error).message, account: null });
       }
     };
 
