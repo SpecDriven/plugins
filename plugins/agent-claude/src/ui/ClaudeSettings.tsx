@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AccountModel, AccountProbe } from "../accountModels";
 import {
   CLAUDE_EFFORTS,
@@ -24,14 +24,6 @@ export interface ClaudeSignIn {
   url: string | null;
   /** Claude Code being fetched before the sign-in starts. */
   download: { receivedBytes: number; totalBytes: number | null } | null;
-  /** The CLI takes the code a sign-in page opened from the link shows. */
-  acceptsCode: boolean;
-  /** A code was handed to the CLI, which has not answered it yet. Absent
-      from a plugin host before it. */
-  codeSent?: boolean;
-  /** The CLI's words for a code it refused and waited past — pasted
-      incomplete, say. Absent from a plugin host before it. */
-  codeError?: string | null;
   done: boolean;
   error: string | null;
 }
@@ -479,19 +471,18 @@ export function ClaudeAccount({
   onModels: (models: AccountModel[] | null) => void;
 }) {
   const [email, setEmail] = useState(info.login.email ?? "");
-  const [code, setCode] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [check, setCheck] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const signIn = info.signIn;
   const inProgress = signIn?.inProgress ?? false;
-  /** The sign-in page already opened, so a poll that brings it opens it once. */
-  const opened = useRef<string | null>(null);
   const signedIn = info.login.loggedIn && info.login.method !== "api_key";
 
   // While the browser sign-in is under way, ask the server every couple of
   // seconds whether it came back; once it has, the account's models are
-  // asked for again.
+  // asked for again. The browser is the CLI's to open: the page it prints
+  // for a browser that did not open shows a code to paste into a terminal,
+  // which this page has no use for, so it opens nothing of its own.
   useEffect(() => {
     if (!inProgress) return;
     let live = true;
@@ -501,11 +492,6 @@ export function ClaudeAccount({
       const next = result.data.signIn;
       if (next?.inProgress) {
         onChange({ ...info, signIn: next, login: result.data.login });
-        // After a download the CLI's page arrives by poll, not by the start.
-        if (next.url && opened.current !== next.url) {
-          opened.current = next.url;
-          window.open(next.url, "_blank", "noopener");
-        }
       } else {
         await refresh();
         if (next?.done) reloadModels();
@@ -525,17 +511,6 @@ export function ClaudeAccount({
     const result = await call<{ signIn: ClaudeSignIn }>("POST", "/api/claude/login", { email: email.trim() });
     setBusy(false);
     if (!result.ok) return setStatus(result.error);
-    onChange({ ...info, signIn: result.data.signIn });
-    if (result.data.signIn.url) opened.current = result.data.signIn.url;
-    if (result.data.signIn.url) window.open(result.data.signIn.url, "_blank", "noopener");
-  };
-  const sendCode = async () => {
-    setBusy(true);
-    setStatus(null);
-    const result = await call<{ signIn: ClaudeSignIn }>("POST", "/api/claude/login/code", { code: code.trim() });
-    setBusy(false);
-    if (!result.ok) return setStatus(result.error);
-    setCode("");
     onChange({ ...info, signIn: result.data.signIn });
   };
   const cancel = async () => {
@@ -621,53 +596,10 @@ export function ClaudeAccount({
         </>
       ) : inProgress ? (
         <>
-          <p className="hint">
-            Finish signing in in your browser
-            {signIn?.url ? (
-              <>
-                {" "}
-                —{" "}
-                <a href={signIn.url} target="_blank" rel="noopener noreferrer">
-                  open the sign-in page
-                </a>{" "}
-                if it did not open by itself
-              </>
-            ) : null}
-            .
+          <p className="hint" role="status">
+            Finish signing in in the browser window Claude Code opened — approve the sign-in there. This page updates by
+            itself once Claude Code has the account; nothing is pasted here.
           </p>
-          {signIn?.acceptsCode && (
-            <>
-              <p className="hint">Signed in through that link? The page then shows a code — paste it here to finish.</p>
-              <div className="auth-row">
-                <input
-                  aria-label="Code from the sign-in page"
-                  value={code}
-                  disabled={signIn.codeSent}
-                  onChange={(e) => setCode(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && code.trim() && !signIn.codeSent) void sendCode();
-                  }}
-                  placeholder="Code from the sign-in page"
-                  autoComplete="one-time-code"
-                  spellCheck={false}
-                />
-                <button className="secondary" disabled={busy || !code.trim() || signIn.codeSent} onClick={() => void sendCode()}>
-                  {signIn.codeSent ? "Finishing…" : "Finish sign-in"}
-                </button>
-              </div>
-              {signIn.codeSent && (
-                <p className="hint" role="status">
-                  Code sent — waiting for Claude Code to finish the sign-in with it…
-                </p>
-              )}
-              {signIn.codeError && !signIn.codeSent && (
-                <p className="error" role="alert">
-                  Claude Code refused that code: {signIn.codeError} Finish the sign-in page first if it still waits on you, then
-                  paste the whole code it shows.
-                </p>
-              )}
-            </>
-          )}
           <div className="auth-row">
             <button className="secondary" onClick={() => void cancel()}>
               Cancel

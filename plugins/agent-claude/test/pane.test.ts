@@ -28,6 +28,7 @@ import {
   setQueryFactory,
 } from "../src/provider";
 import type { AccountInfoLike, QueryLike } from "../src/provider";
+import { ACCOUNT_SETTINGS } from "../src/auth";
 import { setClaudeAvailability } from "../src/cli";
 import { AGENT_MODELS_FILE } from "../src/models";
 import { mountPlugin, quietProfile } from "./app";
@@ -1236,8 +1237,6 @@ test("the sign-in Settings chose reaches Claude as a --settings override (src/au
   const account = await api("/api/agent/chat", "POST", { name: "account" });
   expect(account.status).toBe(200);
   const login = fakes.at(-1)!.options;
-  expect(JSON.parse(login.extraArgs!.settings!)).toEqual({
-    env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" },
-  });
+  expect(JSON.parse(login.extraArgs!.settings!)).toEqual(JSON.parse(ACCOUNT_SETTINGS));
   expect(login.env?.ANTHROPIC_BASE_URL).toBeUndefined();
 });

@@ -40,13 +40,34 @@ export const ACCOUNT_MODELS_TIMEOUT_MS = 20_000;
 /** How long an answer is kept before Claude Code is asked again. */
 export const ACCOUNT_MODELS_TTL_MS = 10 * 60_000;
 
-/** Claude Code's rows as AccountModels, dropping any that is no model id. */
+/** The model family a value names: an alias is its own (`opus`), a model
+    id's is the word after `claude-` (`claude-opus-4-8[1m]` → `opus`); null
+    for an id of another shape, which stands alone. */
+export function modelFamily(value: string): string | null {
+  if (!value.includes("-")) return value.toLowerCase();
+  const match = /^claude-([a-z]+)/i.exec(value);
+  return match ? match[1]!.toLowerCase() : null;
+}
+
+/**
+ * Claude Code's rows as AccountModels, dropping any that is no model id,
+ * and one row per model family: the first Claude Code lists — the alias
+ * where it has one (`opus`, `sonnet`, `haiku`, Fable's id) — never the
+ * explicit ids of the same models an organization is also offered
+ * (`claude-opus-4-8`, `claude-opus-4-7`, …), which only lengthen the menu.
+ */
 export function accountModelsOf(rows: unknown): AccountModel[] {
   if (!Array.isArray(rows)) return [];
   const models: AccountModel[] = [];
+  const families = new Set<string>();
   for (const row of rows as Record<string, unknown>[]) {
     const value = normalizeDefaultModel(row?.value);
     if (!value || models.some((m) => m.value === value)) continue;
+    const family = modelFamily(value);
+    if (family) {
+      if (families.has(family)) continue;
+      families.add(family);
+    }
     const resolved = normalizeDefaultModel(row.resolvedModel);
     const efforts = effortsOf(row);
     models.push({

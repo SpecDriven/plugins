@@ -22,7 +22,6 @@ import {
   logout as claudeLogout,
   onSignInChange,
   startLogin,
-  submitLoginCode,
 } from "./auth";
 import type { EffectiveClaudeAuth, LoginStatus } from "./auth";
 import { NO_ACCOUNT, accountModels, fetchAccountModels, forgetAccountModels } from "./accountModels";
@@ -228,15 +227,6 @@ const plugin: Plugin<Context, HostConfig> = {
       }
     };
 
-    const postLoginCode: Handler = async (req) => {
-      const body = (await req.json().catch(() => ({}))) as { code?: unknown };
-      try {
-        return json({ signIn: submitLoginCode(typeof body.code === "string" ? body.code : "") });
-      } catch (e) {
-        return claudeFailure("sign-in code", e);
-      }
-    };
-
     const getLogin: Handler = async () => json({ signIn: loginState(), login: await loginStatus() });
 
     const deleteLogin: Handler = () => json({ signIn: cancelLogin() });
@@ -300,7 +290,6 @@ const plugin: Plugin<Context, HostConfig> = {
     add("POST", "/api/claude/proxy/check", postProxyCheck);
     add("POST", "/api/claude/login", postLogin);
     add("GET", "/api/claude/login", getLogin);
-    add("POST", "/api/claude/login/code", postLoginCode);
     add("DELETE", "/api/claude/login", deleteLogin);
     add("POST", "/api/claude/logout", postLogout);
     add("POST", "/api/claude/login/check", postLoginCheck);
