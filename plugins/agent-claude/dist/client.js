@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
@@ -79,7 +79,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/ui/ClaudeSettings.tsx
+// src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -476,7 +476,10 @@ function accountModelLabel(model, account) {
   const name = row.description.split(" · ")[0]?.trim() || row.displayName;
   return name && name !== model.value ? `${name} — ${model.value}` : model.value;
 }
-function signInCheckText(login, models, error) {
+function signInCheckText(login, models, error, account = null) {
+  if (account?.billing === "none") {
+    return "Not signed in — the Claude Code started under the account found no account, token or key. Sign in below.";
+  }
   if (!login.loggedIn)
     return "Not signed in — the Claude CLI has no account. Sign in below.";
   if (login.method === "api_key")
@@ -580,10 +583,10 @@ function ClaudeAccount({
       setCheck(null);
       return setStatus(result.error);
     }
-    const { login, models, error } = result.data;
-    onChange({ ...info, login });
+    const { login, models, error, account = null } = result.data;
+    onChange({ ...info, login: account?.billing === "none" ? { loggedIn: false, method: "none", email: null } : login });
     onModels(models.length > 0 ? models : null);
-    setCheck(signInCheckText(login, models, error));
+    setCheck(signInCheckText(login, models, error, account));
   };
   const who = !info.login.loggedIn ? /* @__PURE__ */ jsxs(Fragment2, {
     children: [
@@ -608,7 +611,7 @@ function ClaudeAccount({
       "."
     ]
   }) : /* @__PURE__ */ jsx(Fragment2, {
-    children: "Signed in to a Claude account."
+    children: "Signed in with a token Claude Code found in its environment."
   });
   return /* @__PURE__ */ jsxs("div", {
     className: "settings-row auth-section",
@@ -958,7 +961,7 @@ function ClaudeProxy({
   });
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/client.tsx
+// src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -986,5 +989,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=97CD276C2D69D72F64756E2164756E21
+//# debugId=1118A1B1AB5B331264756E2164756E21
 //# sourceMappingURL=client.js.map

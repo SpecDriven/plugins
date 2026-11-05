@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/host.ts
+// src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44571,20 +44571,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// ../../../../plugins-image-paste/plugins/agent-claude/src/binaries.json
+// src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44599,7 +44599,7 @@ var binaries_default = {
   }
 };
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44727,7 +44727,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/cli.ts
+// src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44739,7 +44739,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44846,7 +44846,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 class ClaudeAuthError extends Error {
   status;
   constructor(message, status) {
@@ -44909,14 +44909,14 @@ async function effectiveClaudeAuth(own, cwd, storedToken, env = process.env) {
     storedToken: storedToken !== null
   };
 }
+var LOGIN_SETTINGS = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" } });
 function launchFor(auth, env = process.env) {
   const processEnv = claudeProcessEnv(env);
   if (auth.mode === "login") {
     delete processEnv.ANTHROPIC_BASE_URL;
     delete processEnv.ANTHROPIC_AUTH_TOKEN;
     delete processEnv.ANTHROPIC_API_KEY;
-    const settings2 = { env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" } };
-    return { mode: "login", env: processEnv, extraArgs: { settings: JSON.stringify(settings2) }, apiBaseUrl: undefined };
+    return { mode: "login", env: processEnv, extraArgs: { settings: LOGIN_SETTINGS }, apiBaseUrl: undefined };
   }
   if (!auth.proxy) {
     return { mode: "proxy", env: processEnv, extraArgs: {}, apiBaseUrl: undefined };
@@ -44953,23 +44953,10 @@ async function loginStatus(runner = run) {
   const env = claudeProcessEnv();
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
-  const result = await runner(claude, ["auth", "status", "--json"], { env });
+  const result = await runner(claude, ["--settings", LOGIN_SETTINGS, "auth", "status", "--json"], { env });
   if (result.exitCode !== 0 && !result.stdout.trim())
     return { loggedIn: false, method: "unknown", email: null };
-  const status = parseLoginStatus(result.stdout);
-  if (status.loggedIn && !status.email && status.method !== "api_key")
-    status.email = await accountEmail(env);
-  return status;
-}
-async function accountEmail(env = process.env) {
-  const file = env.CLAUDE_CONFIG_DIR ? join2(env.CLAUDE_CONFIG_DIR, ".claude.json") : join2(homedir2(), ".claude.json");
-  try {
-    const parsed = JSON.parse(await readFile(file, "utf8"));
-    const email = parsed?.oauthAccount?.emailAddress;
-    return typeof email === "string" && email ? email : null;
-  } catch {
-    return null;
-  }
+  return parseLoginStatus(result.stdout);
 }
 var flow = null;
 var signInListeners = new Set;
@@ -45185,7 +45172,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/provider.ts
+// src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45870,7 +45857,7 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/accountModels.ts
+// src/accountModels.ts
 function effortsOf(row) {
   if (row.supportsEffort === false)
     return [];
@@ -45900,6 +45887,7 @@ function accountModelsOf(rows) {
   }
   return models;
 }
+var NO_ACCOUNT = { account: null, models: [] };
 async function fetchAccountModels(own, cwd, token, factory = currentQueryFactory(), timeoutMs = ACCOUNT_MODELS_TIMEOUT_MS) {
   const launch = await claudeLaunch(own, cwd, token);
   const abortController = new AbortController;
@@ -45919,12 +45907,14 @@ async function fetchAccountModels(own, cwd, token, factory = currentQueryFactory
         ...Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}
       }
     });
-    if (!query.supportedModels)
-      return [];
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error("Claude Code did not list its models in time")), timeoutMs);
     });
-    return accountModelsOf(await Promise.race([query.supportedModels(), timeout]));
+    const info = query.accountInfo ? await Promise.race([query.accountInfo(), timeout]) : undefined;
+    const account = info ? describeAccount(info, launch.apiBaseUrl) : null;
+    if (account?.billing === "none" || !query.supportedModels)
+      return { account, models: [] };
+    return { account, models: accountModelsOf(await Promise.race([query.supportedModels(), timeout])) };
   } finally {
     clearTimeout(timer);
     prompt.close();
@@ -45935,12 +45925,12 @@ var cached = null;
 var pending2 = null;
 async function accountModels(ask, now = Date.now()) {
   if (cached && now - cached.at < ACCOUNT_MODELS_TTL_MS)
-    return cached.models;
+    return cached.probe;
   if (!pending2) {
-    const asking = ask().then((models) => {
+    const asking = ask().then((probe2) => {
       if (pending2 === asking)
-        cached = { models, at: Date.now() };
-      return models;
+        cached = { probe: probe2, at: Date.now() };
+      return probe2;
     }).finally(() => {
       if (pending2 === asking)
         pending2 = null;
@@ -45954,7 +45944,7 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/models.ts
+// src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
@@ -45972,7 +45962,7 @@ async function listedClaudeModels(dataDir) {
   }
 }
 
-// ../../../../plugins-image-paste/plugins/agent-claude/src/host.ts
+// src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -46055,14 +46045,15 @@ var plugin = {
         return process.cwd();
       }
     };
-    const signedInAccountModels = async () => {
+    const signedInAccount = async () => {
       const own = await settings();
       const cwd = await claudeCwd();
       const token = await storedToken(secrets);
       if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login")
-        return [];
-      return accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : []);
+        return NO_ACCOUNT;
+      return accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : NO_ACCOUNT);
     };
+    const signedInAccountModels = async () => (await signedInAccount()).models;
     const answer = async () => {
       const own = await settings();
       const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
@@ -46132,12 +46123,13 @@ var plugin = {
     const postLoginCheck = async () => {
       const login = await loginStatus();
       if (!login.loggedIn || login.method === "api_key")
-        return json({ login, models: [], error: null });
+        return json({ login, models: [], error: null, account: null });
       forgetAccountModels();
       try {
-        return json({ login, models: await signedInAccountModels(), error: null });
+        const { account, models } = await signedInAccount();
+        return json({ login, models, error: null, account });
       } catch (e) {
-        return json({ login, models: [], error: e.message });
+        return json({ login, models: [], error: e.message, account: null });
       }
     };
     const getModels = async () => {
@@ -46181,5 +46173,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=E38ED5699B2173B964756E2164756E21
+//# debugId=D7DDEE2B06C69C6264756E2164756E21
 //# sourceMappingURL=host.js.map

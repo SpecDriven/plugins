@@ -21,6 +21,7 @@ import {
   claudeProcessEnv,
   detectClaudeProxy,
   effectiveClaudeAuth,
+  LOGIN_SETTINGS,
   launchFor,
   loginState,
   loginStatus,
@@ -306,16 +307,34 @@ test("loginStatus asks the CLI without any key in its environment, and says miss
   });
   expect(status).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
   expect(calls[0]!.cmd).toBe("claude");
-  expect(calls[0]!.args).toEqual(["auth", "status", "--json"]);
+  expect(calls[0]!.args).toEqual(["--settings", LOGIN_SETTINGS, "auth", "status", "--json"]);
   expect(calls[0]!.env?.ANTHROPIC_API_KEY).toBeUndefined();
   setClaudeAvailability(() => false);
   expect(await loginStatus()).toEqual({ loggedIn: false, method: "missing", email: null });
 });
 
+test("a bearer token in Claude Code's settings file is not a sign-in: the CLI is asked with the account's --settings", async () => {
+  // `claude auth status` counts ANTHROPIC_AUTH_TOKEN from a settings file
+  // as an "oauth_token" login — one no session of the app's can use, since
+  // the account sign-in clears it. Asked with that same --settings, a
+  // global flag before the subcommand, the CLI answers nobody.
+  const calls: string[][] = [];
+  const status = await loginStatus(async (_cmd, args) => {
+    calls.push(args);
+    const settings = args[0] === "--settings" ? (JSON.parse(args[1]!) as { env?: Record<string, string> }) : null;
+    const cleared = settings?.env?.ANTHROPIC_AUTH_TOKEN === "";
+    return { exitCode: 0, stdout: cleared ? '{"loggedIn":false,"authMethod":"none"}' : '{"loggedIn":true,"authMethod":"oauth_token"}', stderr: "" };
+  });
+  expect(calls[0]).toEqual(["--settings", LOGIN_SETTINGS, "auth", "status", "--json"]);
+  expect(status).toEqual({ loggedIn: false, method: "none", email: null });
+});
+
 // A stand-in `claude`: its login prints the browser url, then "signs in" by
 // touching a marker file the status command reads. Constant body — the
 // marker's path comes in through the environment (the app's tests/helpers/fakeBin.ts).
+// The status is asked with the account's --settings first (src/auth.ts).
 const FAKE_CLAUDE = `#!/bin/sh
+if [ "$1" = "--settings" ]; then shift 2; fi
 case "$1 $2" in
   "auth status")
     if [ -f "$SPECDRIVEN_TEST_LOGIN_MARK" ]; then
@@ -341,6 +360,7 @@ exit 1
 // A stand-in whose browser never comes back: its login waits for the code
 // the sign-in page shows, the way Claude Code's does, and takes only one.
 const FAKE_CLAUDE_CODE = `#!/bin/sh
+if [ "$1" = "--settings" ]; then shift 2; fi
 case "$1 $2" in
   "auth status")
     if [ -f "$SPECDRIVEN_TEST_LOGIN_MARK" ]; then
@@ -820,14 +840,12 @@ test("a Claude plugin switched off takes its routes and its provider away", asyn
   expect((await call("GET", "/api/claude/settings")).status).toBe(200);
 });
 
-test("loginStatus names the account from Claude Code's config when auth status does not", async () => {
+test("a token login names no account, even with a profile in Claude Code's config", async () => {
+  // The profile in .claude.json may be another Claude's — the desktop
+  // app's, on a machine with both — so only what the CLI says names one.
   const answer = (stdout: string) => loginStatus(async () => ({ exitCode: 0, stdout, stderr: "" }));
-  const tokenLogin = '{"loggedIn":true,"authMethod":"oauth_token"}';
-  expect(await answer(tokenLogin)).toEqual({ loggedIn: true, method: "oauth_token", email: null });
-
   await writeFile(join(config, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "ada@example.com" } }));
-  expect(await answer(tokenLogin)).toEqual({ loggedIn: true, method: "oauth_token", email: "ada@example.com" });
-  // What the CLI says wins; an API key or nobody signed in names no account.
+  expect(await answer('{"loggedIn":true,"authMethod":"oauth_token"}')).toEqual({ loggedIn: true, method: "oauth_token", email: null });
   expect((await answer('{"loggedIn":true,"authMethod":"claude.ai","email":"bo@example.com"}')).email).toBe("bo@example.com");
   expect((await answer('{"loggedIn":true,"authMethod":"api_key"}')).email).toBeNull();
   expect((await answer('{"loggedIn":false,"authMethod":"none"}')).email).toBeNull();
@@ -836,28 +854,34 @@ test("loginStatus names the account from Claude Code's config when auth status d
 test("POST /api/claude/login/check asks the CLI afresh and, signed in, a Claude Code for the account's models", async () => {
   await fakeClaudeOnPath();
   let asked = 0;
+  const opus = [{ value: "opus", displayName: "Opus", description: "" }];
   setQueryFactory(() => {
     asked++;
-    return { supportedModels: async () => [{ value: "opus", displayName: "Opus", description: "" }] } as unknown as QueryLike;
+    return {
+      accountInfo: async () => ({ email: "ada@example.com", subscriptionType: "Claude Max", apiProvider: "firstParty" }),
+      supportedModels: async () => opus,
+    } as unknown as QueryLike;
   });
   // Nobody signed in: it says so, and Claude Code is not started.
   const out = await call("POST", "/api/claude/login/check");
   expect(out.status).toBe(200);
-  expect(out.body).toEqual({ login: { loggedIn: false, method: "none", email: null }, models: [], error: null });
+  expect(out.body).toEqual({ login: { loggedIn: false, method: "none", email: null }, models: [], error: null, account: null });
   expect(asked).toBe(0);
 
   await call("POST", "/api/claude/login", { email: "ada@example.com" });
   await settle(() => !loginState()!.inProgress);
   await call("GET", "/api/claude/models");
   expect(asked).toBe(1);
-  // Signed in: the account's models, asked of a fresh Claude Code rather
-  // than taken from the last answer — and kept for the page from then on.
+  // Signed in: the account that Claude Code runs as and its models, asked
+  // of a fresh Claude Code rather than taken from the last answer — and
+  // kept for the page from then on.
   const checked = await call("POST", "/api/claude/login/check");
   expect(checked.status).toBe(200);
   expect(checked.body).toEqual({
     login: { loggedIn: true, method: "claude.ai", email: "ada@example.com" },
-    models: [{ value: "opus", displayName: "Opus", description: "" }],
+    models: opus,
     error: null,
+    account: { billing: "plan", label: "Claude Max", detail: "Claude subscription · ada@example.com · credential: claude.ai login" },
   });
   expect(asked).toBe(2);
   await call("GET", "/api/claude/models");
@@ -866,7 +890,17 @@ test("POST /api/claude/login/check asks the CLI afresh and, signed in, a Claude 
   setQueryFactory(() => ({ supportedModels: async () => { throw new Error("Claude Code exited"); } }) as unknown as QueryLike);
   const failed = await call("POST", "/api/claude/login/check");
   expect(failed.status).toBe(200);
-  expect(failed.body).toEqual({ login: { loggedIn: true, method: "claude.ai", email: "ada@example.com" }, models: [], error: "Claude Code exited" });
+  expect(failed.body).toEqual({ login: { loggedIn: true, method: "claude.ai", email: "ada@example.com" }, models: [], error: "Claude Code exited", account: null });
+  // A Claude Code that found no account, token or key — the CLI's "login"
+  // was something a session cannot use: nobody, and no models for nobody.
+  setQueryFactory(() => ({ accountInfo: async () => ({ tokenSource: "none", apiProvider: "firstParty" }), supportedModels: async () => opus }) as unknown as QueryLike);
+  const nobody = await call("POST", "/api/claude/login/check");
+  expect(nobody.status).toBe(200);
+  expect(nobody.body).toMatchObject({ login: { loggedIn: true }, models: [], error: null, account: { billing: "none", label: "Not logged in" } });
+  expect((await call("GET", "/api/claude/models")).body).toEqual({ models: [] });
+  // One from before accountInfo: its models, and no account to show.
+  setQueryFactory(() => ({ supportedModels: async () => opus }) as unknown as QueryLike);
+  expect((await call("POST", "/api/claude/login/check")).body).toMatchObject({ models: opus, account: null });
   // Signed out meanwhile: the check says so.
   await call("POST", "/api/claude/logout");
   expect((await call("POST", "/api/claude/login/check")).body).toMatchObject({ login: { loggedIn: false }, models: [] });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AccountModel } from "../accountModels";
+import type { AccountModel, AccountProbe } from "../accountModels";
 import {
   CLAUDE_EFFORTS,
   CLAUDE_MODEL_ALIASES,
@@ -432,8 +432,17 @@ export function accountModelLabel(model: AccountModel, account: AccountModel[]):
   return name && name !== model.value ? `${name} — ${model.value}` : model.value;
 }
 
-/** What "Check sign-in" found, in a sentence. */
-export function signInCheckText(login: ClaudeAuthInfo["login"], models: AccountModel[], error: string | null): string {
+/** What "Check sign-in" found, in a sentence: first what the Claude Code
+    started under the account found, then what the CLI said. */
+export function signInCheckText(
+  login: ClaudeAuthInfo["login"],
+  models: AccountModel[],
+  error: string | null,
+  account: AccountProbe["account"] = null,
+): string {
+  if (account?.billing === "none") {
+    return "Not signed in — the Claude Code started under the account found no account, token or key. Sign in below.";
+  }
   if (!login.loggedIn) return "Not signed in — the Claude CLI has no account. Sign in below.";
   if (login.method === "api_key") return "Signed in with an API key, not a Claude account — sign in below.";
   const who = login.email ? `Signed in as ${login.email}` : "Signed in to a Claude account";
@@ -541,19 +550,24 @@ export function ClaudeAccount({
     setBusy(true);
     setStatus(null);
     setCheck("Checking — asking the Claude CLI, then starting a Claude Code under the account…");
-    const result = await call<{ login: ClaudeAuthInfo["login"]; models: AccountModel[]; error: string | null }>(
-      "POST",
-      "/api/claude/login/check",
-    );
+    const result = await call<{
+      login: ClaudeAuthInfo["login"];
+      models: AccountModel[];
+      error: string | null;
+      /** Absent from a plugin host before it. */
+      account?: AccountProbe["account"];
+    }>("POST", "/api/claude/login/check");
     setBusy(false);
     if (!result.ok) {
       setCheck(null);
       return setStatus(result.error);
     }
-    const { login, models, error } = result.data;
-    onChange({ ...info, login });
+    const { login, models, error, account = null } = result.data;
+    // A Claude Code that found no sign-in is the last word: the section
+    // says "Not signed in" and offers the sign-in, whatever the CLI said.
+    onChange({ ...info, login: account?.billing === "none" ? { loggedIn: false, method: "none", email: null } : login });
     onModels(models.length > 0 ? models : null);
-    setCheck(signInCheckText(login, models, error));
+    setCheck(signInCheckText(login, models, error, account));
   };
 
   const who = !info.login.loggedIn ? (
@@ -570,7 +584,7 @@ export function ClaudeAccount({
       Signed in as <strong>{info.login.email}</strong>.
     </>
   ) : (
-    <>Signed in to a Claude account.</>
+    <>Signed in with a token Claude Code found in its environment.</>
   );
 
   return (
