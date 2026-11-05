@@ -420,6 +420,39 @@ test("a turn goes to Claude and its reply streams into the event log", async () 
   expect(snap.meta.lastSeq).toBe(seqs.at(-1)!);
 });
 
+// A 1×1 PNG, as the pane sends a pasted one.
+const PNG_1X1 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const pngBlock = { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_1X1 } } as const;
+
+// Apps from 0.1.230 carry pasted images to the agent; the floor and
+// release rows run an older app, whose engine has no images to hand over.
+const withImages = test.if("getChatImage" in engine);
+withImages("pasted images go to Claude as image blocks before the text, and images alone carry no text block", async () => {
+  expect((agents.get("claude")!.capabilities as { images?: boolean }).images).toBe(true);
+  const { id, fake } = await idleSession();
+  const sent = await api(`/api/agent/chat/${id}/message`, "POST", {
+    text: "what is wrong here?",
+    images: [{ mediaType: "image/png", data: PNG_1X1 }],
+  });
+  expect(sent.status).toBe(200);
+  expect((await fake.input(1)).message.content).toEqual([pngBlock, { type: "text", text: "what is wrong here?" }]);
+  fake.emit(result());
+  await untilStatus(id, "idle");
+
+  await api(`/api/agent/chat/${id}/message`, "POST", { images: [{ mediaType: "image/png", data: PNG_1X1 }] });
+  expect((await fake.input(2)).message.content).toEqual([pngBlock]);
+
+  // A session started from a paste opens with it.
+  const res = await api("/api/agent/chat", "POST", {
+    name: "from a paste",
+    prompt: "explain",
+    images: [{ mediaType: "image/png", data: PNG_1X1 }],
+  });
+  expect(res.status).toBe(200);
+  expect((await fakes.at(-1)!.input(1)).message.content).toEqual([pngBlock, { type: "text", text: "explain" }]);
+});
+
 test("the event stream replays what a reconnecting pane missed", async () => {
   const { id, fake } = await idleSession();
   await api(`/api/agent/chat/${id}/message`, "POST", { text: "hi" });

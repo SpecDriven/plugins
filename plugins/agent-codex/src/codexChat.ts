@@ -305,9 +305,13 @@ export function codexThreadInfo(data: CodexParams | undefined): {
   };
 }
 
-/** The `input` of a turn/start or turn/steer: one text item. */
-export function codexTextInput(textValue: string): CodexParams[] {
-  return [{ type: "text", text: textValue, text_elements: [] }];
+/** The `input` of a turn/start or turn/steer: one text item, after the
+    images pasted with it as `localImage` items — Codex reads them from the
+    copies the app keeps. A message of images alone has no text item. */
+export function codexTextInput(textValue: string, imagePaths: readonly string[] = []): CodexParams[] {
+  const images: CodexParams[] = imagePaths.map((path) => ({ type: "localImage", path }));
+  if (images.length > 0 && !textValue.trim()) return images;
+  return [...images, { type: "text", text: textValue, text_elements: [] }];
 }
 
 // --- Codex's notifications → the pane's events ------------------------------

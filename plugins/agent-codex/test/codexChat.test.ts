@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "@specdriven/app/src/server/api";
 import { endAllChatSessions } from "@specdriven/app/src/server/agentChat";
+import * as engine from "@specdriven/app/src/server/agentChat";
 import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentTypes";
 import { createFeature, saveFeature } from "@specdriven/app/src/server/features";
 import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
@@ -667,6 +668,36 @@ test("a turn goes to Codex as turn/start and its items stream into the log", asy
     durationMs: 1200,
     numTurns: 1,
   });
+});
+
+// A 1×1 PNG, as the pane sends a pasted one.
+const PNG_1X1 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+// Apps from 0.1.230 carry pasted images to the agent; the floor and
+// release rows run an older app, whose engine has no images to hand over.
+const withImages = test.if("getChatImage" in engine);
+withImages("pasted images go to Codex as localImage items, read from the copies the app keeps", async () => {
+  const { id, codex } = await idleCodexSession();
+  const sent = await api(`/api/agent/chat/${id}/message`, "POST", {
+    text: "what is wrong here?",
+    images: [{ mediaType: "image/png", data: PNG_1X1 }],
+  });
+  expect(sent.status).toBe(200);
+  const input = (codex.sent("turn/start")!.params as { input: Record<string, unknown>[] }).input;
+  expect(input).toHaveLength(2);
+  expect(input[1]).toEqual({ type: "text", text: "what is wrong here?", text_elements: [] });
+  const path = input[0]!.path as string;
+  expect(input[0]).toEqual({ type: "localImage", path });
+  expect(path.startsWith(join(root, ".specdriven", "sessions", id, "images"))).toBe(true);
+  expect(Buffer.from(await readFile(path)).toString("base64")).toBe(PNG_1X1);
+
+  codex.notify("turn/completed", { threadId: "thread-1", turn: { id: "turn-1", status: "completed", items: [], error: null } });
+  await untilStatus(id, "idle");
+  // Images alone: no text item.
+  await api(`/api/agent/chat/${id}/message`, "POST", { images: [{ mediaType: "image/png", data: PNG_1X1 }] });
+  const second = (codex.allSent("turn/start").at(-1)!.params as { input: Record<string, unknown>[] }).input;
+  expect(second.map((i) => i.type)).toEqual(["localImage"]);
 });
 
 test("a command approval is a permission card; Allow once, Allow always and Deny become Codex's decisions", async () => {

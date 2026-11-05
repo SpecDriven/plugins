@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// src/settings.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
@@ -79,7 +79,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// src/ui/ClaudeSettings.tsx
+// ../../../../plugins-image-paste/plugins/agent-claude/src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -958,7 +958,7 @@ function ClaudeProxy({
   });
 }
 
-// src/client.tsx
+// ../../../../plugins-image-paste/plugins/agent-claude/src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -986,5 +986,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=062A6CC88C75247464756E2164756E21
+//# debugId=97CD276C2D69D72F64756E2164756E21
 //# sourceMappingURL=client.js.map

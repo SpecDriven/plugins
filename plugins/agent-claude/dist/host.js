@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// src/host.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44571,20 +44571,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// src/auth.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// src/binary.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// src/binaries.json
+// ../../../../plugins-image-paste/plugins/agent-claude/src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44599,7 +44599,7 @@ var binaries_default = {
   }
 };
 
-// src/binary.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44727,7 +44727,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// src/cli.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44739,7 +44739,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// src/settings.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44846,7 +44846,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// src/auth.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/auth.ts
 class ClaudeAuthError extends Error {
   status;
   constructor(message, status) {
@@ -45185,7 +45185,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// src/provider.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45281,8 +45281,18 @@ function currentQueryFactory() {
   return queryFactory ?? sdkFactory;
 }
 var firstResponseReader = null;
-function userMessage(text) {
-  return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
+function userMessage(text, images = []) {
+  if (images.length === 0) {
+    return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
+  }
+  const content = [
+    ...images.map((image) => ({
+      type: "image",
+      source: { type: "base64", media_type: image.mediaType, data: image.data }
+    })),
+    ...text.trim() ? [{ type: "text", text }] : []
+  ];
+  return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
 }
 function commandInfo(c) {
   return { name: c.name, description: c.description ?? "", argumentHint: c.argumentHint ?? "" };
@@ -45466,10 +45476,10 @@ class ClaudeSession {
       ...decision.remember && suggestions.length > 0 ? { updatedPermissions: suggestions } : {}
     };
   };
-  async send(text) {
+  async send(text, images) {
     if (this.restarting)
       await this.restarting;
-    this.input.push(userMessage(text));
+    this.input.push(userMessage(text, images));
     this.armFirstResponse();
   }
   async interrupt() {
@@ -45733,7 +45743,8 @@ function createClaudeProvider(options = {}) {
       rememberPermissions: "rule",
       oneShot: true,
       canChangeModelMidSession: true,
-      effort: true
+      effort: true,
+      images: true
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -45770,8 +45781,8 @@ function createClaudeProvider(options = {}) {
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
       session.effort = opts.effort ?? (await settings()).defaultEffort;
-      if (opts.prompt)
-        session.input.push(userMessage(opts.prompt));
+      if (opts.prompt || opts.images?.length)
+        session.input.push(userMessage(opts.prompt ?? "", opts.images));
       try {
         const run2 = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
         session.query = run2.query;
@@ -45781,7 +45792,7 @@ function createClaudeProvider(options = {}) {
         session.close();
         throw e;
       }
-      if (opts.prompt)
+      if (opts.prompt || opts.images?.length)
         session.armFirstResponse();
       session.pump(session.query);
       session.ready();
@@ -45859,7 +45870,7 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// src/accountModels.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/accountModels.ts
 function effortsOf(row) {
   if (row.supportsEffort === false)
     return [];
@@ -45943,7 +45954,7 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// src/models.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
@@ -45961,7 +45972,7 @@ async function listedClaudeModels(dataDir) {
   }
 }
 
-// src/host.ts
+// ../../../../plugins-image-paste/plugins/agent-claude/src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -46170,5 +46181,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=6D6BFDC13E58456964756E2164756E21
+//# debugId=E38ED5699B2173B964756E2164756E21
 //# sourceMappingURL=host.js.map

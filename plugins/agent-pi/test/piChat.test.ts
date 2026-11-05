@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "@specdriven/app/src/server/api";
 import { endAllChatSessions } from "@specdriven/app/src/server/agentChat";
+import * as engine from "@specdriven/app/src/server/agentChat";
 import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/app/src/server/agentTypes";
 import { createFeature, saveFeature } from "@specdriven/app/src/server/features";
 import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
@@ -462,6 +463,27 @@ test("a turn goes to pi as a prompt command and its reply streams into the log",
     isError: false,
     costUsd: 0.01,
     numTurns: 1,
+  });
+});
+
+// A 1×1 PNG, as the pane sends a pasted one.
+const PNG_1X1 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+// Apps from 0.1.230 carry pasted images to the agent; the floor and
+// release rows run an older app, whose engine has no images to hand over.
+const withImages = test.if("getChatImage" in engine);
+withImages("pasted images go to pi with its prompt command, as its image items", async () => {
+  const { id, pi } = await idlePiSession();
+  const sent = await api(`/api/agent/chat/${id}/message`, "POST", {
+    text: "what is wrong here?",
+    images: [{ mediaType: "image/png", data: PNG_1X1 }],
+  });
+  expect(sent.status).toBe(200);
+  expect(pi.commands.at(-1)).toEqual({
+    type: "prompt",
+    message: "what is wrong here?",
+    images: [{ type: "image", data: PNG_1X1, mimeType: "image/png" }],
   });
 });
 

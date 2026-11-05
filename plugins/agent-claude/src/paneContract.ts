@@ -26,9 +26,21 @@ export interface AgentDefaultsPatch {
   effort?: ClaudeEffort | null;
 }
 
-export type PaneStartOptions = AgentStartOptions & { model?: string; effort?: ClaudeEffort };
+/** An image pasted into the pane's message (SpecDriven 0.1.230 and later):
+    its bytes, base64, and the copy the app keeps on disk. */
+export interface PastedImage {
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  data: string;
+  path: string;
+}
 
-export type PaneCapabilities = AgentProvider["capabilities"] & { canChangeModelMidSession?: boolean; effort?: boolean };
+export type PaneStartOptions = AgentStartOptions & { model?: string; effort?: ClaudeEffort; images?: PastedImage[] };
+
+export type PaneCapabilities = AgentProvider["capabilities"] & {
+  canChangeModelMidSession?: boolean;
+  effort?: boolean;
+  images?: boolean;
+};
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
   capabilities: PaneCapabilities;

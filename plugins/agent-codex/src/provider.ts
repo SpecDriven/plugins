@@ -12,9 +12,7 @@
 import { AgentError } from "@specdriven/host";
 import type {
   AgentHost,
-  AgentProvider,
   AgentSession,
-  AgentStartOptions,
   PermissionDecision,
   PermissionMode,
   PermissionOutcome,
@@ -37,6 +35,7 @@ import {
   newCodexStream,
 } from "./codexChat";
 import type { CodexParams, CodexStreamContext, RpcId } from "./codexChat";
+import type { PaneProvider, PaneStartOptions, PastedImage } from "./paneContract";
 
 /** The refusal when no `codex` is on PATH. */
 export const CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
@@ -106,7 +105,7 @@ class CodexSession implements AgentSession {
    * the pane's mode as the policy. The thread's answer says the session is
    * ready to type into — and brings the model and Codex's own thread id.
    */
-  async ready(prompt?: string): Promise<void> {
+  async ready(prompt?: string, images?: PastedImage[]): Promise<void> {
     const client = this.client!;
     const init = await client.request("initialize", {
       clientInfo: CODEX_CLIENT_INFO,
@@ -140,9 +139,9 @@ class CodexSession implements AgentSession {
     // Named after the session, so `codex resume` lists it by that name.
     void client.request("thread/name/set", { threadId: info.threadId, name: this.name });
     this.host.ready({ agentSessionId: info.threadId, ...(info.model ? { model: info.model } : {}) });
-    if (prompt) {
+    if (prompt || images?.length) {
       try {
-        await this.send(prompt);
+        await this.send(prompt ?? "", images);
       } catch (e) {
         // The first turn never started: say so, and give the composer back.
         this.host.note("error", "api", (e as Error).message);
@@ -151,14 +150,15 @@ class CodexSession implements AgentSession {
     }
   }
 
-  /** One turn: the text to Codex, with the pane's mode as the policy overrides. */
-  async send(text: string): Promise<void> {
+  /** One turn: the text (and pasted images) to Codex, with the pane's mode
+      as the policy overrides. */
+  async send(text: string, images?: PastedImage[]): Promise<void> {
     const client = this.client!;
     if (!this.threadId || this.final) return;
     const policy = codexPolicy(this.mode);
     const res = await client.request("turn/start", {
       threadId: this.threadId,
-      input: codexTextInput(text),
+      input: codexTextInput(text, images?.map((image) => image.path)),
       approvalPolicy: policy.approvalPolicy,
       sandboxPolicy: codexSandboxPolicy(policy.sandbox),
     });
@@ -369,7 +369,7 @@ class CodexSession implements AgentSession {
   }
 }
 
-export const codexProvider: AgentProvider = {
+export const codexProvider: PaneProvider = {
   id: "codex",
   label: "Codex",
   description: "OpenAI's Codex CLI, with permission cards for commands and file changes",
@@ -384,13 +384,14 @@ export const codexProvider: AgentProvider = {
     hasAccount: false,
     rememberPermissions: "session",
     oneShot: true,
+    images: true,
   },
   defaultPermissionMode: "default",
   loginHint: {
     text: "The Codex CLI is not signed in on this machine: run the command in a terminal, then start a new session.",
     command: "codex login",
   },
-  async start(opts: AgentStartOptions): Promise<AgentSession> {
+  async start(opts: PaneStartOptions): Promise<AgentSession> {
     const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode);
     session.client = new CodexClient({
       cwd: opts.cwd,
@@ -403,7 +404,7 @@ export const codexProvider: AgentProvider = {
     // The prompt is the first turn, once the thread is up; the core shows
     // it in the transcript straight away, and the composer stays closed
     // until Codex has taken it.
-    void session.ready(opts.prompt);
+    void session.ready(opts.prompt, opts.images);
     return session;
   },
   // The app's one-shot turns (an estimate, say) go through `codex exec`,
