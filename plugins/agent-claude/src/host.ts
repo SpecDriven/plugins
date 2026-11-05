@@ -241,6 +241,23 @@ const plugin: Plugin<Context, HostConfig> = {
       return answer();
     };
 
+    // Settings → Claude's "Check sign-in": the CLI asked afresh who is
+    // signed in and, with an account, a Claude Code started under it for
+    // the models it offers — proof the sign-in works, never the cached
+    // answer, and the list "Default model" shows from then on. A Claude
+    // Code that cannot answer is reported, not an error: the sign-in may
+    // still be fine.
+    const postLoginCheck: Handler = async () => {
+      const login = await loginStatus();
+      if (!login.loggedIn || login.method === "api_key") return json({ login, models: [], error: null });
+      forgetAccountModels();
+      try {
+        return json({ login, models: await signedInAccountModels(), error: null });
+      } catch (e) {
+        return json({ login, models: [], error: (e as Error).message });
+      }
+    };
+
     // The models the Claude account offers, for Settings → Claude's
     // "Default model"; none behind a proxy or with no one signed in.
     const getModels: Handler = async () => {
@@ -273,6 +290,7 @@ const plugin: Plugin<Context, HostConfig> = {
     add("POST", "/api/claude/login/code", postLoginCode);
     add("DELETE", "/api/claude/login", deleteLogin);
     add("POST", "/api/claude/logout", postLogout);
+    add("POST", "/api/claude/login/check", postLoginCheck);
     add("GET", "/api/claude/models", getModels);
     add("GET", "/api/claude/settings", getSettings);
     add("PUT", "/api/claude/settings", putSettings);

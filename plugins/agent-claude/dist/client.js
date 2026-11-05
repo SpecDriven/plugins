@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// ../plugins-composer-bar/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
@@ -79,7 +79,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// ../plugins-composer-bar/plugins/agent-claude/src/ui/ClaudeSettings.tsx
+// src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -130,6 +130,8 @@ function ClaudeSettings({ models = null } = {}) {
   const [error, setError] = useState(null);
   const [account, setAccount] = useState(null);
   const accountKey = info?.mode === "login" && info.login.loggedIn ? info.login.email ?? "" : null;
+  const [modelsAsk, setModelsAsk] = useState(0);
+  const reloadModels = () => setModelsAsk((n) => n + 1);
   useEffect(() => {
     setAccount(null);
     if (accountKey === null)
@@ -142,7 +144,7 @@ function ClaudeSettings({ models = null } = {}) {
     return () => {
       live = false;
     };
-  }, [accountKey]);
+  }, [accountKey, modelsAsk]);
   const refresh = async () => {
     const next = await fetchClaudeAuth();
     setFailed(next === null);
@@ -205,7 +207,9 @@ function ClaudeSettings({ models = null } = {}) {
       info.mode === "login" ? /* @__PURE__ */ jsx(ClaudeAccount, {
         info,
         onChange: setInfo,
-        refresh
+        refresh,
+        reloadModels,
+        onModels: setAccount
       }) : /* @__PURE__ */ jsx(ClaudeProxy, {
         info,
         refresh,
@@ -472,18 +476,34 @@ function accountModelLabel(model, account) {
   const name = row.description.split(" · ")[0]?.trim() || row.displayName;
   return name && name !== model.value ? `${name} — ${model.value}` : model.value;
 }
+function signInCheckText(login, models, error) {
+  if (!login.loggedIn)
+    return "Not signed in — the Claude CLI has no account. Sign in below.";
+  if (login.method === "api_key")
+    return "Signed in with an API key, not a Claude account — sign in below.";
+  const who = login.email ? `Signed in as ${login.email}` : "Signed in to a Claude account";
+  if (error)
+    return `${who}, but Claude Code could not list the account's models: ${error}`;
+  if (models.length === 0)
+    return `${who}, but Claude Code listed no models for the account.`;
+  return `${who} — Claude Code started under the account and lists ${models.length} model${models.length === 1 ? "" : "s"}.`;
+}
 function ClaudeAccount({
   info,
   onChange,
-  refresh
+  refresh,
+  reloadModels,
+  onModels
 }) {
   const [email, setEmail] = useState(info.login.email ?? "");
   const [code, setCode] = useState("");
   const [status, setStatus] = useState(null);
+  const [check, setCheck] = useState(null);
   const [busy, setBusy] = useState(false);
   const signIn = info.signIn;
   const inProgress = signIn?.inProgress ?? false;
   const opened = useRef(null);
+  const signedIn = info.login.loggedIn && info.login.method !== "api_key";
   useEffect(() => {
     if (!inProgress)
       return;
@@ -499,8 +519,11 @@ function ClaudeAccount({
           opened.current = next.url;
           window.open(next.url, "_blank", "noopener");
         }
-      } else
+      } else {
         await refresh();
+        if (next?.done)
+          reloadModels();
+      }
     };
     const timer = setInterval(() => void tick(), signIn?.download ? 500 : 2000);
     return () => {
@@ -511,6 +534,7 @@ function ClaudeAccount({
   const start = async () => {
     setBusy(true);
     setStatus(null);
+    setCheck(null);
     const result = await call("POST", "/api/claude/login", { email: email.trim() });
     setBusy(false);
     if (!result.ok)
@@ -538,13 +562,54 @@ function ClaudeAccount({
   const signOut = async () => {
     setBusy(true);
     setStatus(null);
+    setCheck(null);
     const result = await call("POST", "/api/claude/logout");
     setBusy(false);
     if (!result.ok)
       return setStatus(result.error);
     await refresh();
+    setCheck("Signed out.");
   };
-  const who = info.login.loggedIn ? info.login.method === "api_key" ? "Signed in with an API key, not a Claude account — sessions in this mode set it aside, so sign in below." : info.login.email ? "Signed in" : "Signed in to a Claude account" : "Not signed in";
+  const checkSignIn = async () => {
+    setBusy(true);
+    setStatus(null);
+    setCheck("Checking — asking the Claude CLI, then starting a Claude Code under the account…");
+    const result = await call("POST", "/api/claude/login/check");
+    setBusy(false);
+    if (!result.ok) {
+      setCheck(null);
+      return setStatus(result.error);
+    }
+    const { login, models, error } = result.data;
+    onChange({ ...info, login });
+    onModels(models.length > 0 ? models : null);
+    setCheck(signInCheckText(login, models, error));
+  };
+  const who = !info.login.loggedIn ? /* @__PURE__ */ jsxs(Fragment2, {
+    children: [
+      /* @__PURE__ */ jsx("strong", {
+        children: "Not signed in."
+      }),
+      " Enter the email of your Claude account to sign in through the browser."
+    ]
+  }) : info.login.method === "api_key" ? /* @__PURE__ */ jsxs(Fragment2, {
+    children: [
+      /* @__PURE__ */ jsx("strong", {
+        children: "Signed in with an API key, not a Claude account"
+      }),
+      " — sessions in this mode set it aside, so sign in below."
+    ]
+  }) : info.login.email ? /* @__PURE__ */ jsxs(Fragment2, {
+    children: [
+      "Signed in as ",
+      /* @__PURE__ */ jsx("strong", {
+        children: info.login.email
+      }),
+      "."
+    ]
+  }) : /* @__PURE__ */ jsx(Fragment2, {
+    children: "Signed in to a Claude account."
+  });
   return /* @__PURE__ */ jsxs("div", {
     className: "settings-row auth-section",
     children: [
@@ -558,21 +623,10 @@ function ClaudeAccount({
       }) : !info.cliAvailable ? /* @__PURE__ */ jsx("p", {
         className: "hint",
         children: "Enter the email of your Claude account to sign in through the browser. Claude Code is not installed, so the app downloads it first (about 90 MB, once)."
-      }) : /* @__PURE__ */ jsxs("p", {
+      }) : /* @__PURE__ */ jsx("p", {
         className: "hint",
-        children: [
-          who,
-          info.login.loggedIn && info.login.email && info.login.method !== "api_key" ? /* @__PURE__ */ jsxs(Fragment2, {
-            children: [
-              " ",
-              "as ",
-              /* @__PURE__ */ jsx("strong", {
-                children: info.login.email
-              })
-            ]
-          }) : null,
-          info.login.loggedIn && info.login.method !== "api_key" ? "." : info.login.loggedIn ? "" : " — enter the email of your Claude account to sign in through the browser."
-        ]
+        role: "status",
+        children: who
       }),
       inProgress && signIn?.download ? /* @__PURE__ */ jsxs(Fragment2, {
         children: [
@@ -658,6 +712,22 @@ function ClaudeAccount({
             })
           })
         ]
+      }) : signedIn ? /* @__PURE__ */ jsxs("div", {
+        className: "auth-row",
+        children: [
+          /* @__PURE__ */ jsx("button", {
+            className: "secondary",
+            disabled: busy,
+            onClick: () => void checkSignIn(),
+            children: "Check sign-in"
+          }),
+          /* @__PURE__ */ jsx("button", {
+            className: "secondary",
+            disabled: busy,
+            onClick: () => void signOut(),
+            children: "Sign out"
+          })
+        ]
       }) : (info.cliAvailable || info.canFetchClaude) && /* @__PURE__ */ jsxs("div", {
         className: "auth-row",
         children: [
@@ -677,15 +747,20 @@ function ClaudeAccount({
             className: "secondary",
             disabled: busy || !email.trim(),
             onClick: () => void start(),
-            children: info.login.loggedIn && info.login.method !== "api_key" ? "Switch account…" : "Sign in…"
+            children: "Sign in"
           }),
-          info.login.loggedIn && info.login.method !== "api_key" && /* @__PURE__ */ jsx("button", {
+          info.cliAvailable && /* @__PURE__ */ jsx("button", {
             className: "secondary",
             disabled: busy,
-            onClick: () => void signOut(),
-            children: "Sign out"
+            onClick: () => void checkSignIn(),
+            children: "Check sign-in"
           })
         ]
+      }),
+      check && !inProgress && /* @__PURE__ */ jsx("p", {
+        className: "hint",
+        role: "status",
+        children: check
       }),
       signIn?.error && !inProgress && /* @__PURE__ */ jsx("p", {
         className: "error",
@@ -883,7 +958,7 @@ function ClaudeProxy({
   });
 }
 
-// ../plugins-composer-bar/plugins/agent-claude/src/client.tsx
+// src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -911,5 +986,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=DFCE5613E1FFE8E364756E2164756E21
+//# debugId=062A6CC88C75247464756E2164756E21
 //# sourceMappingURL=client.js.map

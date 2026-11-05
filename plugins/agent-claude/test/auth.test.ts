@@ -832,3 +832,42 @@ test("loginStatus names the account from Claude Code's config when auth status d
   expect((await answer('{"loggedIn":true,"authMethod":"api_key"}')).email).toBeNull();
   expect((await answer('{"loggedIn":false,"authMethod":"none"}')).email).toBeNull();
 });
+
+test("POST /api/claude/login/check asks the CLI afresh and, signed in, a Claude Code for the account's models", async () => {
+  await fakeClaudeOnPath();
+  let asked = 0;
+  setQueryFactory(() => {
+    asked++;
+    return { supportedModels: async () => [{ value: "opus", displayName: "Opus", description: "" }] } as unknown as QueryLike;
+  });
+  // Nobody signed in: it says so, and Claude Code is not started.
+  const out = await call("POST", "/api/claude/login/check");
+  expect(out.status).toBe(200);
+  expect(out.body).toEqual({ login: { loggedIn: false, method: "none", email: null }, models: [], error: null });
+  expect(asked).toBe(0);
+
+  await call("POST", "/api/claude/login", { email: "ada@example.com" });
+  await settle(() => !loginState()!.inProgress);
+  await call("GET", "/api/claude/models");
+  expect(asked).toBe(1);
+  // Signed in: the account's models, asked of a fresh Claude Code rather
+  // than taken from the last answer — and kept for the page from then on.
+  const checked = await call("POST", "/api/claude/login/check");
+  expect(checked.status).toBe(200);
+  expect(checked.body).toEqual({
+    login: { loggedIn: true, method: "claude.ai", email: "ada@example.com" },
+    models: [{ value: "opus", displayName: "Opus", description: "" }],
+    error: null,
+  });
+  expect(asked).toBe(2);
+  await call("GET", "/api/claude/models");
+  expect(asked).toBe(2);
+  // A Claude Code that cannot list them: still signed in, with why.
+  setQueryFactory(() => ({ supportedModels: async () => { throw new Error("Claude Code exited"); } }) as unknown as QueryLike);
+  const failed = await call("POST", "/api/claude/login/check");
+  expect(failed.status).toBe(200);
+  expect(failed.body).toEqual({ login: { loggedIn: true, method: "claude.ai", email: "ada@example.com" }, models: [], error: "Claude Code exited" });
+  // Signed out meanwhile: the check says so.
+  await call("POST", "/api/claude/logout");
+  expect((await call("POST", "/api/claude/login/check")).body).toMatchObject({ login: { loggedIn: false }, models: [] });
+});
