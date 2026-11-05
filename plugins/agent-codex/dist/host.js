@@ -5,6 +5,7 @@ if (!m)
 var host_default = m.default ?? m;
 var A = m.A;
 var AgentError = m.AgentError;
+var EFFORT_LEVELS = m.EFFORT_LEVELS;
 var HOSTED_REFUSAL = m.HOSTED_REFUSAL;
 var agents = m.agents;
 var commitAndPush = m.commitAndPush;
@@ -21,6 +22,8 @@ var jsonlReader = m.jsonlReader;
 var listFileDocs = m.listFileDocs;
 var loadFileDoc = m.loadFileDoc;
 var newFileDoc = m.newFileDoc;
+var normalizeEffort = m.normalizeEffort;
+var normalizeModel = m.normalizeModel;
 var normalizePermissionMode = m.normalizePermissionMode;
 var readTextFile = m.readTextFile;
 var removeAndPush = m.removeAndPush;
@@ -34,19 +37,19 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// src/cli.ts
+// ../../../../plugins-image-paste/plugins/agent-codex/src/cli.ts
 var CODEX_BIN = "codex";
 var probe = null;
 function codexAvailable() {
   return probe ? probe() : which(CODEX_BIN) !== null;
 }
 
-// src/oneShot.ts
+// ../../../../plugins-image-paste/plugins/agent-codex/src/oneShot.ts
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// src/codexChat.ts
+// ../../../../plugins-image-paste/plugins/agent-codex/src/codexChat.ts
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 var nodeSpawn = (o) => {
@@ -224,8 +227,11 @@ function codexThreadInfo(data) {
     ...cliVersion ? { cliVersion } : {}
   };
 }
-function codexTextInput(textValue) {
-  return [{ type: "text", text: textValue, text_elements: [] }];
+function codexTextInput(textValue, imagePaths = []) {
+  const images = imagePaths.map((path) => ({ type: "localImage", path }));
+  if (images.length > 0 && !textValue.trim())
+    return images;
+  return [...images, { type: "text", text: textValue, text_elements: [] }];
 }
 function record(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -554,7 +560,7 @@ function codexAnswers(questions, answers) {
   return { answers: out };
 }
 
-// src/oneShot.ts
+// ../../../../plugins-image-paste/plugins/agent-codex/src/oneShot.ts
 var KILL_GRACE_MS = 3000;
 var STDERR_TAIL = 5;
 function codexExecArgs(cwd, outFile, schemaFile, model) {
@@ -734,7 +740,7 @@ function runExec(req, args) {
   });
 }
 
-// src/provider.ts
+// ../../../../plugins-image-paste/plugins/agent-codex/src/provider.ts
 var CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
 var str = (value) => typeof value === "string" ? value : null;
 var rec = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -776,7 +782,7 @@ class CodexSession {
     this.host.failed(tail ? `Could not start Codex: ${why}
 ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
   }
-  async ready(prompt) {
+  async ready(prompt, images) {
     const client = this.client;
     const init = await client.request("initialize", {
       clientInfo: CODEX_CLIENT_INFO,
@@ -804,23 +810,23 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
     this.host.note("info", "init", "Permission modes map onto Codex's approval policy and sandbox; a change applies from the next turn.");
     client.request("thread/name/set", { threadId: info.threadId, name: this.name });
     this.host.ready({ agentSessionId: info.threadId, ...info.model ? { model: info.model } : {} });
-    if (prompt) {
+    if (prompt || images?.length) {
       try {
-        await this.send(prompt);
+        await this.send(prompt ?? "", images);
       } catch (e) {
         this.host.note("error", "api", e.message);
         this.host.turnEnded();
       }
     }
   }
-  async send(text2) {
+  async send(text2, images) {
     const client = this.client;
     if (!this.threadId || this.final)
       return;
     const policy = codexPolicy(this.mode);
     const res = await client.request("turn/start", {
       threadId: this.threadId,
-      input: codexTextInput(text2),
+      input: codexTextInput(text2, images?.map((image) => image.path)),
       approvalPolicy: policy.approvalPolicy,
       sandboxPolicy: codexSandboxPolicy(policy.sandbox)
     });
@@ -1025,7 +1031,8 @@ var codexProvider = {
     canChangeModeMidSession: true,
     hasAccount: false,
     rememberPermissions: "session",
-    oneShot: true
+    oneShot: true,
+    images: true
   },
   defaultPermissionMode: "default",
   loginHint: {
@@ -1042,13 +1049,13 @@ var codexProvider = {
       onExit: (code, error) => session.exited(code, error)
     });
     opts.signal.addEventListener("abort", () => session.close(), { once: true });
-    session.ready(opts.prompt);
+    session.ready(opts.prompt, opts.images);
     return session;
   },
   oneShot: codexOneShot
 };
 
-// src/host.ts
+// ../../../../plugins-image-paste/plugins/agent-codex/src/host.ts
 var plugin = {
   name: "agent-codex",
   inject: ["agents"],
@@ -1062,5 +1069,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=121825FB8A1B868264756E2164756E21
+//# debugId=9BB0670AAA9A659F64756E2164756E21
 //# sourceMappingURL=host.js.map

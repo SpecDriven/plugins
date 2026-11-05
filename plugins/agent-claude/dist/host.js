@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -45268,8 +45268,18 @@ function currentQueryFactory() {
   return queryFactory ?? sdkFactory;
 }
 var firstResponseReader = null;
-function userMessage(text) {
-  return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
+function userMessage(text, images = []) {
+  if (images.length === 0) {
+    return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
+  }
+  const content = [
+    ...images.map((image) => ({
+      type: "image",
+      source: { type: "base64", media_type: image.mediaType, data: image.data }
+    })),
+    ...text.trim() ? [{ type: "text", text }] : []
+  ];
+  return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
 }
 function commandInfo(c) {
   return { name: c.name, description: c.description ?? "", argumentHint: c.argumentHint ?? "" };
@@ -45453,10 +45463,10 @@ class ClaudeSession {
       ...decision.remember && suggestions.length > 0 ? { updatedPermissions: suggestions } : {}
     };
   };
-  async send(text) {
+  async send(text, images) {
     if (this.restarting)
       await this.restarting;
-    this.input.push(userMessage(text));
+    this.input.push(userMessage(text, images));
     this.armFirstResponse();
   }
   async interrupt() {
@@ -45720,7 +45730,8 @@ function createClaudeProvider(options = {}) {
       rememberPermissions: "rule",
       oneShot: true,
       canChangeModelMidSession: true,
-      effort: true
+      effort: true,
+      images: true
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -45757,8 +45768,8 @@ function createClaudeProvider(options = {}) {
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
       session.effort = opts.effort ?? (await settings()).defaultEffort;
-      if (opts.prompt)
-        session.input.push(userMessage(opts.prompt));
+      if (opts.prompt || opts.images?.length)
+        session.input.push(userMessage(opts.prompt ?? "", opts.images));
       try {
         const run2 = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
         session.query = run2.query;
@@ -45768,7 +45779,7 @@ function createClaudeProvider(options = {}) {
         session.close();
         throw e;
       }
-      if (opts.prompt)
+      if (opts.prompt || opts.images?.length)
         session.armFirstResponse();
       session.pump(session.query);
       session.ready();
@@ -46162,5 +46173,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=7E8B8DE2A53BE12E64756E2164756E21
+//# debugId=D7DDEE2B06C69C6264756E2164756E21
 //# sourceMappingURL=host.js.map

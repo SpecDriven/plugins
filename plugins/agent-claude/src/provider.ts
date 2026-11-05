@@ -35,7 +35,14 @@ import type {
 import { claudeLaunch, detectClaudeProxy } from "./auth";
 import { CLAUDE_BIN, claudeAvailable, claudeExecutable } from "./cli";
 import type { AccountModel } from "./accountModels";
-import type { AgentChoices, AgentDefaultsPatch, AgentModelOption, PaneProvider, PaneStartOptions } from "./paneContract";
+import type {
+  AgentChoices,
+  AgentDefaultsPatch,
+  AgentModelOption,
+  PaneProvider,
+  PaneStartOptions,
+  PastedImage,
+} from "./paneContract";
 import { CLAUDE_MODEL_ALIASES, DEFAULT_SETTINGS, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 // --- The account chip -------------------------------------------------------
@@ -228,8 +235,21 @@ export function setClaudeFirstResponseSeconds(fn: (() => Promise<number>) | null
   return previous;
 }
 
-export function userMessage(text: string): SDKUserMessage {
-  return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
+/** A user turn for Claude Code: the text, or, with pasted images, the
+    images first and then the text (an empty text block is refused, so a
+    message of images alone has none). */
+export function userMessage(text: string, images: readonly PastedImage[] = []): SDKUserMessage {
+  if (images.length === 0) {
+    return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
+  }
+  const content = [
+    ...images.map((image) => ({
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: image.mediaType, data: image.data },
+    })),
+    ...(text.trim() ? [{ type: "text" as const, text }] : []),
+  ];
+  return { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
 }
 
 function commandInfo(c: SlashCommand): SlashCommandInfo {
@@ -469,9 +489,9 @@ class ClaudeSession implements AgentSession {
     };
   };
 
-  async send(text: string): Promise<void> {
+  async send(text: string, images?: PastedImage[]): Promise<void> {
     if (this.restarting) await this.restarting;
-    this.input.push(userMessage(text));
+    this.input.push(userMessage(text, images));
     this.armFirstResponse();
   }
 
@@ -814,6 +834,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
       oneShot: true,
       canChangeModelMidSession: true,
       effort: true,
+      images: true,
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -863,7 +884,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
       session.effort = opts.effort ?? (await settings()).defaultEffort;
-      if (opts.prompt) session.input.push(userMessage(opts.prompt));
+      if (opts.prompt || opts.images?.length) session.input.push(userMessage(opts.prompt ?? "", opts.images));
       try {
         const run = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
         session.query = run.query;
@@ -873,7 +894,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
         session.close();
         throw e;
       }
-      if (opts.prompt) session.armFirstResponse();
+      if (opts.prompt || opts.images?.length) session.armFirstResponse();
       void session.pump(session.query);
       void session.ready();
       return session;

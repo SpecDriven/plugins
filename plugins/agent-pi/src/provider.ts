@@ -8,10 +8,11 @@
 //
 // Node APIs only (src/server/run.ts): this module also runs under Electron.
 
-import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions } from "@specdriven/host";
+import type { AgentHost, AgentSession } from "@specdriven/host";
 import { PI_BIN, piAvailable } from "./cli";
 import { PiClient, mapPiEvent, newPiStream, piCommands, piState } from "./piChat";
 import type { PiEvent, PiStreamContext } from "./piChat";
+import type { PaneProvider, PaneStartOptions, PastedImage } from "./paneContract";
 
 /** The refusal when no `pi` is on PATH. */
 export const PI_MISSING = "Pi CLI not found — install the `pi` command (https://pi.dev)";
@@ -76,8 +77,16 @@ class PiSession implements AgentSession {
     this.host.failed(detail(`Pi exited with code ${code}.`));
   }
 
-  async send(text: string): Promise<void> {
-    this.client!.send({ type: "prompt", message: text });
+  /** One turn: a `prompt` command, with the pasted images as pi's
+      ImageContent items. */
+  async send(text: string, images?: PastedImage[]): Promise<void> {
+    this.client!.send({
+      type: "prompt",
+      message: text,
+      ...(images?.length
+        ? { images: images.map((image) => ({ type: "image", data: image.data, mimeType: image.mediaType })) }
+        : {}),
+    });
   }
 
   async interrupt(): Promise<void> {
@@ -95,7 +104,7 @@ class PiSession implements AgentSession {
   }
 }
 
-export const piProvider: AgentProvider = {
+export const piProvider: PaneProvider = {
   id: "pi",
   label: "Pi",
   description: "Minimal, and runs its own tools — nothing asks for permission",
@@ -111,6 +120,7 @@ export const piProvider: AgentProvider = {
     hasAccount: false,
     rememberPermissions: "none",
     oneShot: false,
+    images: true,
   },
   // Pi runs its own tools with no gate of any kind; any other mode would
   // promise a prompt that never comes.
@@ -119,7 +129,7 @@ export const piProvider: AgentProvider = {
     text: "Pi has no credentials for this model here: run pi in a terminal and /login, then start a new session.",
     command: "pi",
   },
-  async start(opts: AgentStartOptions): Promise<AgentSession> {
+  async start(opts: PaneStartOptions): Promise<AgentSession> {
     const session = new PiSession(opts.host, opts.cwd);
     session.client = new PiClient({
       cwd: opts.cwd,
@@ -131,7 +141,7 @@ export const piProvider: AgentProvider = {
     opts.signal.addEventListener("abort", () => session.close(), { once: true });
     // The prompt can go before pi has read a byte: the pipe holds it until
     // its RPC loop starts.
-    if (opts.prompt) await session.send(opts.prompt);
+    if (opts.prompt || opts.images?.length) await session.send(opts.prompt ?? "", opts.images);
     void session.ready();
     return session;
   },

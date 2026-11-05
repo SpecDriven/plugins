@@ -5,6 +5,7 @@ if (!m)
 var host_default = m.default ?? m;
 var A = m.A;
 var AgentError = m.AgentError;
+var EFFORT_LEVELS = m.EFFORT_LEVELS;
 var HOSTED_REFUSAL = m.HOSTED_REFUSAL;
 var agents = m.agents;
 var commitAndPush = m.commitAndPush;
@@ -21,6 +22,8 @@ var jsonlReader = m.jsonlReader;
 var listFileDocs = m.listFileDocs;
 var loadFileDoc = m.loadFileDoc;
 var newFileDoc = m.newFileDoc;
+var normalizeEffort = m.normalizeEffort;
+var normalizeModel = m.normalizeModel;
 var normalizePermissionMode = m.normalizePermissionMode;
 var readTextFile = m.readTextFile;
 var removeAndPush = m.removeAndPush;
@@ -34,14 +37,14 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins/plugins/agent-pi/src/cli.ts
+// ../../../../plugins-image-paste/plugins/agent-pi/src/cli.ts
 var PI_BIN = "pi";
 var probe = null;
 function piAvailable() {
   return probe ? probe() : which(PI_BIN) !== null;
 }
 
-// ../../../../plugins/plugins/agent-pi/src/piChat.ts
+// ../../../../plugins-image-paste/plugins/agent-pi/src/piChat.ts
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 var nodeSpawn = (o) => {
@@ -378,7 +381,7 @@ function piState(data) {
   return { ...name ? { model: name } : {}, ...sessionId ? { sessionId } : {} };
 }
 
-// ../../../../plugins/plugins/agent-pi/src/provider.ts
+// ../../../../plugins-image-paste/plugins/agent-pi/src/provider.ts
 var PI_MISSING = "Pi CLI not found — install the `pi` command (https://pi.dev)";
 var PI_NO_PERMISSIONS = "Pi runs its own tools — SpecDriven cannot gate them, so nothing asks for permission.";
 
@@ -438,8 +441,12 @@ ${tail}` : text2;
       return this.host.ended("Pi exited.");
     this.host.failed(detail(`Pi exited with code ${code}.`));
   }
-  async send(text2) {
-    this.client.send({ type: "prompt", message: text2 });
+  async send(text2, images) {
+    this.client.send({
+      type: "prompt",
+      message: text2,
+      ...images?.length ? { images: images.map((image) => ({ type: "image", data: image.data, mimeType: image.mediaType })) } : {}
+    });
   }
   async interrupt() {
     await this.client.request({ type: "abort" });
@@ -464,7 +471,8 @@ var piProvider = {
     canChangeModeMidSession: false,
     hasAccount: false,
     rememberPermissions: "none",
-    oneShot: false
+    oneShot: false,
+    images: true
   },
   defaultPermissionMode: "bypassPermissions",
   loginHint: {
@@ -481,14 +489,14 @@ var piProvider = {
       onExit: (code, error) => session.exited(code, error)
     });
     opts.signal.addEventListener("abort", () => session.close(), { once: true });
-    if (opts.prompt)
-      await session.send(opts.prompt);
+    if (opts.prompt || opts.images?.length)
+      await session.send(opts.prompt ?? "", opts.images);
     session.ready();
     return session;
   }
 };
 
-// ../../../../plugins/plugins/agent-pi/src/host.ts
+// ../../../../plugins-image-paste/plugins/agent-pi/src/host.ts
 var plugin = {
   name: "agent-pi",
   inject: ["agents"],
@@ -502,5 +510,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=6FC29C320FC79D6164756E2164756E21
+//# debugId=DC694C66C2EB853264756E2164756E21
 //# sourceMappingURL=host.js.map
