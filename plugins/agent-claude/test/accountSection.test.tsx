@@ -71,3 +71,24 @@ test("the check's finding is one sentence: the account, and whether Claude Code 
   );
   expect(signInCheckText(ada, models, null, { billing: "plan", label: "Claude Max", detail: "" })).toContain("lists 2 models.");
 });
+
+test("a code handed to the CLI shows as being checked, and one it refused shows the CLI's words under the field", () => {
+  const nobody = { loggedIn: false, method: "none", email: null };
+  const signIn = (extra: Partial<NonNullable<ClaudeAuthInfo["signIn"]>>) =>
+    ({ inProgress: true, email: "ada@example.com", url: "https://claude.com/cai/oauth/authorize", download: null, acceptsCode: true, done: false, error: null, ...extra }) as ClaudeAuthInfo["signIn"];
+
+  const waiting = html(nobody, { signIn: signIn({ codeSent: true, codeError: null }) });
+  expect(buttons(waiting)).toEqual(["Finishing…", "Cancel"]);
+  expect(waiting).toContain("Code sent — waiting for Claude Code to finish the sign-in with it…");
+  expect(waiting).toMatch(/<input[^>]*aria-label="Code from the sign-in page"[^>]*disabled/);
+
+  const refused = html(nobody, { signIn: signIn({ codeSent: false, codeError: "Invalid code. Please make sure the full code was copied." }) });
+  expect(buttons(refused)).toEqual(["Finish sign-in", "Cancel"]);
+  expect(refused).toContain('<p class="error" role="alert">Claude Code refused that code: Invalid code. Please make sure the full code was copied.');
+  expect(refused).not.toContain("Code sent");
+
+  // A plugin host from before the two fields: the field and button as they were.
+  const before = html(nobody, { signIn: signIn({}) });
+  expect(buttons(before)).toEqual(["Finish sign-in", "Cancel"]);
+  expect(before).not.toContain("refused that code");
+});

@@ -9,7 +9,7 @@
 // Claude only, so every route refuses in the hosted app and the demo.
 
 import { homedir } from "node:os";
-import { AgentError, HOSTED_REFUSAL, isDemoMode, isHostedMode, json } from "@specdriven/host";
+import { AgentError, HOSTED_REFUSAL, getLogger, isDemoMode, isHostedMode, json } from "@specdriven/host";
 import type { Context, Handler, HostConfig, Plugin, SecretStore } from "@specdriven/host";
 import {
   ClaudeAuthError,
@@ -85,8 +85,14 @@ function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus, own: Clau
   };
 }
 
-const claudeFailure = (e: unknown) =>
-  e instanceof ClaudeAuthError ? json({ error: e.message }, e.status) : json({ error: (e as Error).message }, 502);
+const log = getLogger("agent-claude");
+
+/** The refusal a sign-in route answers with, logged with what was asked. */
+const claudeFailure = (what: string, e: unknown) => {
+  const status = e instanceof ClaudeAuthError ? e.status : 502;
+  log.warn(`${what} refused`, { status, error: (e as Error).message });
+  return json({ error: (e as Error).message }, status);
+};
 
 /** The token the store holds, or null. */
 async function storedToken(secrets: SecretStore): Promise<string | null> {
@@ -218,7 +224,7 @@ const plugin: Plugin<Context, HostConfig> = {
       try {
         return json({ signIn: await startLogin(typeof body.email === "string" ? body.email : "") });
       } catch (e) {
-        return claudeFailure(e);
+        return claudeFailure("sign-in", e);
       }
     };
 
@@ -227,7 +233,7 @@ const plugin: Plugin<Context, HostConfig> = {
       try {
         return json({ signIn: submitLoginCode(typeof body.code === "string" ? body.code : "") });
       } catch (e) {
-        return claudeFailure(e);
+        return claudeFailure("sign-in code", e);
       }
     };
 
@@ -239,7 +245,7 @@ const plugin: Plugin<Context, HostConfig> = {
       try {
         await claudeLogout();
       } catch (e) {
-        return claudeFailure(e);
+        return claudeFailure("sign-out", e);
       }
       return answer();
     };

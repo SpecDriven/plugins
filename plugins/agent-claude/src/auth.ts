@@ -16,19 +16,26 @@
 // clears a value. Every Claude the app starts — the coding agent pane, the
 // task estimate, self-fix — goes through claudeLaunch for that reason.
 //
+// Every step of the email sign-in — the start, what the CLI prints, a code
+// handed to it and what it made of one, its exit, the end — goes to the
+// app's log (~/.specdriven/logs/specdriven.log, component "agent-claude"),
+// so a sign-in that seems to do nothing can be read back.
+//
 // Node APIs only — this module also runs under Electron.
 
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { run } from "@specdriven/host";
+import { getLogger, run } from "@specdriven/host";
 import type { RunResult } from "@specdriven/host";
 import { binaryDownload, canFetchBinary, fetchBinary, type BinaryDownload } from "./binary";
 import { claudeExecutable } from "./cli";
 import { normalizeClaudeAuth, normalizeClaudeProxyUrl, type ClaudeAuthMode, type ClaudeSettingsValues } from "./settings";
 
 type Env = Record<string, string | undefined>;
+
+const log = getLogger("agent-claude");
 
 export class ClaudeAuthError extends Error {
   constructor(
@@ -240,8 +247,13 @@ export async function loginStatus(runner: Runner = run): Promise<LoginStatus> {
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
   const result = await runner(claude, ["--settings", LOGIN_SETTINGS, "auth", "status", "--json"], { env });
-  if (result.exitCode !== 0 && !result.stdout.trim()) return { loggedIn: false, method: "unknown", email: null };
-  return parseLoginStatus(result.stdout);
+  if (result.exitCode !== 0 && !result.stdout.trim()) {
+    log.warn("claude auth status gave no answer", { claude, exit: result.exitCode, stderr: result.stderr.trim().slice(-300) });
+    return { loggedIn: false, method: "unknown", email: null };
+  }
+  const status = parseLoginStatus(result.stdout);
+  log.debug("claude auth status", { claude, exit: result.exitCode, loggedIn: status.loggedIn, method: status.method });
+  return status;
 }
 
 /** A sign-in started from Settings, as the page polls it. */
@@ -255,6 +267,13 @@ export interface LoginState {
   /** The CLI asks for the code its sign-in page shows when that page was
       opened from the printed link rather than by the CLI. */
   acceptsCode: boolean;
+  /** A code was handed to the CLI, which has not answered it yet: the
+      sign-in finishes with it, or the CLI refuses it. */
+  codeSent: boolean;
+  /** The CLI's words for the last code it refused and waited past — one
+      pasted incomplete, say; null until then, and again once another code
+      is sent. A code the CLI gives up on ends the sign-in with `error`. */
+  codeError: string | null;
   done: boolean;
   error: string | null;
 }
@@ -326,6 +345,8 @@ function publicState(f: LoginFlow): LoginState {
     url: f.url,
     download,
     acceptsCode: f.acceptsCode && f.inProgress,
+    codeSent: f.codeSent && f.inProgress,
+    codeError: f.codeError,
     done: f.done,
     error: f.error,
   };
@@ -336,11 +357,16 @@ export function loginState(): LoginState | null {
   return flow ? publicState(flow) : null;
 }
 
+const CANCELLED = "Sign-in cancelled";
+
 function finish(f: LoginFlow, error: string | null): void {
   if (!f.inProgress) return;
   f.inProgress = false;
   f.done = error === null;
   f.error = error;
+  if (error === null) log.info("sign-in done", { email: f.email });
+  else if (error === CANCELLED) log.info("sign-in cancelled", { email: f.email });
+  else log.warn("sign-in ended without a login", { email: f.email, error, output: f.output.slice(-3).join(" | ") });
   if (f.timer) clearTimeout(f.timer);
   if (f.poll) clearTimeout(f.poll);
   f.timer = null;
@@ -374,6 +400,8 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
     downloading: !claude,
     fetched: false,
     acceptsCode: false,
+    codeSent: false,
+    codeError: null,
     done: false,
     error: null,
     child: null,
@@ -383,9 +411,11 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
     urlWaiters: [],
   };
   flow = f;
+  log.info("sign-in started", { email: address, claude: claude ?? "(fetching Claude Code first)" });
   if (claude) return launchLogin(f, claude, deps);
   (deps.fetchBinary ?? fetchBinary)().then(
     (fetched) => {
+      log.info("Claude Code fetched for the sign-in", { claude: fetched, stillWanted: f.inProgress });
       if (!f.inProgress) return;
       f.downloading = false;
       f.fetched = true;
@@ -395,6 +425,10 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
   );
   return publicState(f);
 }
+
+/** What the CLI says of a code it will not take — pasted incomplete, used
+    before, expired — whether it then waits for another or gives up. */
+const REFUSED_CODE = /invalid|not accepted|incomplete|expired|already used|incorrect|wrong|failed|error/i;
 
 /** Run `auth login` for a flow, and watch for the login it brings. */
 async function launchLogin(f: LoginFlow, claude: string, deps: LoginDeps): Promise<LoginState> {
@@ -411,37 +445,65 @@ async function launchLogin(f: LoginFlow, claude: string, deps: LoginDeps): Promi
     return publicState(f);
   }
   f.child = child;
-  const onData = (data: Buffer | string) => {
+  log.info("sign-in CLI started", { claude, pid: child.pid ?? "?", args: "auth login --email …" });
+  const onData = (stream: "stdout" | "stderr") => (data: Buffer | string) => {
     const text = String(data);
-    f.output = [...f.output, ...text.split("\n").filter((l) => l.trim())].slice(-20);
-    if (/paste (the )?code/i.test(text)) f.acceptsCode = true;
+    const lines = text
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    f.output = [...f.output, ...lines].slice(-20);
+    for (const line of lines) log.debug("sign-in CLI output", { stream, line });
+    if (!f.acceptsCode && /paste (the )?code/i.test(text)) {
+      f.acceptsCode = true;
+      log.info("sign-in takes the code from the sign-in page");
+    }
     if (!f.url) {
       const match = /https:\/\/[^\s'"<>)\]]+/.exec(text);
       if (match) {
         f.url = match[0].replace(/[.,;]+$/, "");
+        log.info("sign-in page printed", { url: f.url });
         for (const wake of f.urlWaiters.splice(0)) wake();
       }
     }
+    // The CLI's answer to a pasted code it refuses: it either waits for
+    // another (the page shows its words and takes one) or exits, which
+    // ends the sign-in below with the same words.
+    if (f.codeSent) {
+      const refusal = lines.find((line) => REFUSED_CODE.test(line));
+      if (refusal) {
+        f.codeSent = false;
+        f.codeError = refusal;
+        log.warn("sign-in code refused by the CLI", { reply: refusal, stream });
+      }
+    }
   };
-  child.stdout?.on("data", onData);
-  child.stderr?.on("data", onData);
-  child.on("error", (e) => finish(f, `Could not start the Claude CLI: ${e.message}`));
-  child.on("exit", (code) => {
+  child.stdout?.on("data", onData("stdout"));
+  child.stderr?.on("data", onData("stderr"));
+  child.on("error", (e) => {
+    log.warn("sign-in CLI failed to start", { claude, error: e.message });
+    finish(f, `Could not start the Claude CLI: ${e.message}`);
+  });
+  child.on("exit", (code, signal) => {
+    log.info("sign-in CLI exited", { exit: code ?? signal ?? "?", codeSent: f.codeSent, lastOutput: f.output.slice(-2).join(" | ") });
     if (!f.inProgress) return;
     // The CLI returns once the browser has come back — or gave up.
-    void status().then((s) => {
-      if (!f.inProgress) return;
-      if (s.loggedIn) finish(f, null);
-      else finish(f, `Sign-in ended without a login (exit ${code ?? "?"})${f.output.length ? `: ${f.output.slice(-2).join(" ")}` : ""}`);
-    });
+    void status().then(
+      (s) => {
+        if (!f.inProgress) return;
+        if (s.loggedIn) finish(f, null);
+        else finish(f, `Sign-in ended without a login (exit ${code ?? "?"})${f.output.length ? `: ${f.output.slice(-2).join(" ")}` : ""}`);
+      },
+      (e: Error) => finish(f, `Sign-in ended, but asking who is signed in failed: ${e.message}`),
+    );
   });
   const pollMs = deps.pollMs ?? LOGIN_POLL_MS;
   const check = async () => {
     if (!f.inProgress) return;
     try {
       if ((await status()).loggedIn) return finish(f, null);
-    } catch {
-      // Ask again next time.
+    } catch (e) {
+      log.debug("sign-in poll could not ask who is signed in", { error: (e as Error).message });
     }
     if (f.inProgress) f.poll = setTimeout(() => void check(), pollMs);
   };
@@ -468,14 +530,31 @@ export function submitLoginCode(code: string): LoginState {
   if (!CODE.test(value)) throw new ClaudeAuthError("Paste the code the sign-in page shows", 400);
   const f = flow;
   const input = f?.inProgress ? f.child?.stdin : null;
-  if (!f || !f.acceptsCode || !input || input.destroyed) throw new ClaudeAuthError("No sign-in is waiting for a code", 409);
-  input.write(`${value}\n`);
+  if (!f || !f.acceptsCode || !input || input.destroyed) {
+    log.warn("sign-in code arrived with no sign-in waiting for one", {
+      inProgress: f?.inProgress ?? false,
+      acceptsCode: f?.acceptsCode ?? false,
+      stdin: input ? (input.destroyed ? "closed" : "open") : "none",
+    });
+    throw new ClaudeAuthError("No sign-in is waiting for a code", 409);
+  }
+  if (f.codeSent) throw new ClaudeAuthError("The last code is still being checked", 409);
+  f.codeSent = true;
+  f.codeError = null;
+  // The code itself stays out of the log: it is the sign-in.
+  log.info("sign-in code handed to the CLI", { length: value.length, wellFormed: value.includes("#") });
+  input.write(`${value}\n`, (e) => {
+    if (e) {
+      log.warn("sign-in code could not be written to the CLI", { error: e.message });
+      finish(f, `Could not hand the code to the Claude CLI: ${e.message}`);
+    }
+  });
   return publicState(f);
 }
 
 /** Stop a sign-in under way; nothing when none is. */
 export function cancelLogin(): LoginState | null {
-  if (flow?.inProgress) finish(flow, "Sign-in cancelled");
+  if (flow?.inProgress) finish(flow, CANCELLED);
   return loginState();
 }
 
@@ -492,8 +571,10 @@ export async function logout(runner: Runner = run): Promise<void> {
   if (!claude) throw new ClaudeAuthError("Claude Code is not set up on this machine", 502);
   const result = await runner(claude, ["auth", "logout"], { env: claudeProcessEnv() });
   if (result.exitCode !== 0) {
+    log.warn("sign-out failed", { claude, exit: result.exitCode, stderr: result.stderr.trim().slice(-300) });
     throw new ClaudeAuthError(`Could not sign out: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`, 502);
   }
+  log.info("signed out", { claude });
   signInChanged();
 }
 

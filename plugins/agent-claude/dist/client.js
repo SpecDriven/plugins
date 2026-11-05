@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// src/settings.ts
+// ../../../../plugins-signin-finish/plugins/agent-claude/src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
@@ -79,7 +79,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// src/ui/ClaudeSettings.tsx
+// ../../../../plugins-signin-finish/plugins/agent-claude/src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -687,9 +687,10 @@ function ClaudeAccount({
                   /* @__PURE__ */ jsx("input", {
                     "aria-label": "Code from the sign-in page",
                     value: code,
+                    disabled: signIn.codeSent,
                     onChange: (e) => setCode(e.target.value),
                     onKeyDown: (e) => {
-                      if (e.key === "Enter" && code.trim())
+                      if (e.key === "Enter" && code.trim() && !signIn.codeSent)
                         sendCode();
                     },
                     placeholder: "Code from the sign-in page",
@@ -698,10 +699,24 @@ function ClaudeAccount({
                   }),
                   /* @__PURE__ */ jsx("button", {
                     className: "secondary",
-                    disabled: busy || !code.trim(),
+                    disabled: busy || !code.trim() || signIn.codeSent,
                     onClick: () => void sendCode(),
-                    children: "Finish sign-in"
+                    children: signIn.codeSent ? "Finishing…" : "Finish sign-in"
                   })
+                ]
+              }),
+              signIn.codeSent && /* @__PURE__ */ jsx("p", {
+                className: "hint",
+                role: "status",
+                children: "Code sent — waiting for Claude Code to finish the sign-in with it…"
+              }),
+              signIn.codeError && !signIn.codeSent && /* @__PURE__ */ jsxs("p", {
+                className: "error",
+                role: "alert",
+                children: [
+                  "Claude Code refused that code: ",
+                  signIn.codeError,
+                  " Finish the sign-in page first if it still waits on you, then paste the whole code it shows."
                 ]
               })
             ]
@@ -961,7 +976,7 @@ function ClaudeProxy({
   });
 }
 
-// src/client.tsx
+// ../../../../plugins-signin-finish/plugins/agent-claude/src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -989,5 +1004,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=1118A1B1AB5B331264756E2164756E21
+//# debugId=C19CDAE48ED6D72F64756E2164756E21
 //# sourceMappingURL=client.js.map

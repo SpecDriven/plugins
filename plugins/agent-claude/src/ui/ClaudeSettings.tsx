@@ -26,6 +26,12 @@ export interface ClaudeSignIn {
   download: { receivedBytes: number; totalBytes: number | null } | null;
   /** The CLI takes the code a sign-in page opened from the link shows. */
   acceptsCode: boolean;
+  /** A code was handed to the CLI, which has not answered it yet. Absent
+      from a plugin host before it. */
+  codeSent?: boolean;
+  /** The CLI's words for a code it refused and waited past — pasted
+      incomplete, say. Absent from a plugin host before it. */
+  codeError?: string | null;
   done: boolean;
   error: string | null;
 }
@@ -636,18 +642,30 @@ export function ClaudeAccount({
                 <input
                   aria-label="Code from the sign-in page"
                   value={code}
+                  disabled={signIn.codeSent}
                   onChange={(e) => setCode(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && code.trim()) void sendCode();
+                    if (e.key === "Enter" && code.trim() && !signIn.codeSent) void sendCode();
                   }}
                   placeholder="Code from the sign-in page"
                   autoComplete="one-time-code"
                   spellCheck={false}
                 />
-                <button className="secondary" disabled={busy || !code.trim()} onClick={() => void sendCode()}>
-                  Finish sign-in
+                <button className="secondary" disabled={busy || !code.trim() || signIn.codeSent} onClick={() => void sendCode()}>
+                  {signIn.codeSent ? "Finishing…" : "Finish sign-in"}
                 </button>
               </div>
+              {signIn.codeSent && (
+                <p className="hint" role="status">
+                  Code sent — waiting for Claude Code to finish the sign-in with it…
+                </p>
+              )}
+              {signIn.codeError && !signIn.codeSent && (
+                <p className="error" role="alert">
+                  Claude Code refused that code: {signIn.codeError} Finish the sign-in page first if it still waits on you, then
+                  paste the whole code it shows.
+                </p>
+              )}
             </>
           )}
           <div className="auth-row">
