@@ -476,7 +476,10 @@ function accountModelLabel(model, account) {
   const name = row.description.split(" · ")[0]?.trim() || row.displayName;
   return name && name !== model.value ? `${name} — ${model.value}` : model.value;
 }
-function signInCheckText(login, models, error) {
+function signInCheckText(login, models, error, account = null) {
+  if (account?.billing === "none") {
+    return "Not signed in — the Claude Code started under the account found no account, token or key. Sign in below.";
+  }
   if (!login.loggedIn)
     return "Not signed in — the Claude CLI has no account. Sign in below.";
   if (login.method === "api_key")
@@ -580,10 +583,10 @@ function ClaudeAccount({
       setCheck(null);
       return setStatus(result.error);
     }
-    const { login, models, error } = result.data;
-    onChange({ ...info, login });
+    const { login, models, error, account = null } = result.data;
+    onChange({ ...info, login: account?.billing === "none" ? { loggedIn: false, method: "none", email: null } : login });
     onModels(models.length > 0 ? models : null);
-    setCheck(signInCheckText(login, models, error));
+    setCheck(signInCheckText(login, models, error, account));
   };
   const who = !info.login.loggedIn ? /* @__PURE__ */ jsxs(Fragment2, {
     children: [
@@ -608,7 +611,7 @@ function ClaudeAccount({
       "."
     ]
   }) : /* @__PURE__ */ jsx(Fragment2, {
-    children: "Signed in to a Claude account."
+    children: "Signed in with a token Claude Code found in its environment."
   });
   return /* @__PURE__ */ jsxs("div", {
     className: "settings-row auth-section",
@@ -986,5 +989,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=062A6CC88C75247464756E2164756E21
+//# debugId=1118A1B1AB5B331264756E2164756E21
 //# sourceMappingURL=client.js.map

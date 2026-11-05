@@ -7,9 +7,10 @@
 // changes or a few minutes pass.
 
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { ChatAccount } from "@specdriven/host";
 import { claudeLaunch } from "./auth";
 import { claudeExecutable } from "./cli";
-import { InputQueue, currentQueryFactory, type QueryFactory } from "./provider";
+import { InputQueue, currentQueryFactory, describeAccount, type QueryFactory } from "./provider";
 import { CLAUDE_EFFORTS, normalizeDefaultModel, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 /** One row of the account's model menu. */
@@ -59,14 +60,27 @@ export function accountModelsOf(rows: unknown): AccountModel[] {
   return models;
 }
 
-/** Ask a Claude Code signed in as the settings say for its model menu. */
+/** What a Claude Code started under the sign-in found: the account it
+    runs as — null when it did not say — and the models it offers, none
+    when it found no account, token or key. */
+export interface AccountProbe {
+  account: ChatAccount | null;
+  models: AccountModel[];
+}
+
+export const NO_ACCOUNT: AccountProbe = { account: null, models: [] };
+
+/** Ask a Claude Code signed in as the settings say who it runs as and for
+    its model menu. The model menu is Claude Code's own list and needs no
+    credential, so the account it reports (its accountInfo, the pane's
+    chip) is what proves the sign-in: with none, there are no models. */
 export async function fetchAccountModels(
   own: ClaudeSettingsValues,
   cwd: string,
   token: string | null,
   factory: QueryFactory = currentQueryFactory(),
   timeoutMs = ACCOUNT_MODELS_TIMEOUT_MS,
-): Promise<AccountModel[]> {
+): Promise<AccountProbe> {
   const launch = await claudeLaunch(own, cwd, token);
   const abortController = new AbortController();
   // No prompt ever comes: the run only starts, answers and is stopped.
@@ -86,11 +100,13 @@ export async function fetchAccountModels(
         ...(Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}),
       },
     });
-    if (!query.supportedModels) return [];
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("Claude Code did not list its models in time")), timeoutMs);
     });
-    return accountModelsOf(await Promise.race([query.supportedModels(), timeout]));
+    const info = query.accountInfo ? await Promise.race([query.accountInfo(), timeout]) : undefined;
+    const account = info ? describeAccount(info, launch.apiBaseUrl) : null;
+    if (account?.billing === "none" || !query.supportedModels) return { account, models: [] };
+    return { account, models: accountModelsOf(await Promise.race([query.supportedModels(), timeout])) };
   } finally {
     clearTimeout(timer);
     prompt.close();
@@ -99,18 +115,18 @@ export async function fetchAccountModels(
 }
 
 /** The last answer, and the one being asked for, shared by every caller. */
-let cached: { models: AccountModel[]; at: number } | null = null;
-let pending: Promise<AccountModel[]> | null = null;
+let cached: { probe: AccountProbe; at: number } | null = null;
+let pending: Promise<AccountProbe> | null = null;
 
-/** The account's models, asked of Claude Code at most once per sign-in and
-    TTL; a failed ask is not kept, so the next one tries again. */
-export async function accountModels(ask: () => Promise<AccountModel[]>, now = Date.now()): Promise<AccountModel[]> {
-  if (cached && now - cached.at < ACCOUNT_MODELS_TTL_MS) return cached.models;
+/** The account and its models, asked of Claude Code at most once per
+    sign-in and TTL; a failed ask is not kept, so the next one tries again. */
+export async function accountModels(ask: () => Promise<AccountProbe>, now = Date.now()): Promise<AccountProbe> {
+  if (cached && now - cached.at < ACCOUNT_MODELS_TTL_MS) return cached.probe;
   if (!pending) {
     const asking = ask()
-      .then((models) => {
-        if (pending === asking) cached = { models, at: Date.now() };
-        return models;
+      .then((probe) => {
+        if (pending === asking) cached = { probe, at: Date.now() };
+        return probe;
       })
       .finally(() => {
         if (pending === asking) pending = null;
