@@ -22,7 +22,8 @@ import {
   claudeProcessEnv,
   detectClaudeProxy,
   effectiveClaudeAuth,
-  LOGIN_SETTINGS,
+  ACCOUNT_SETTINGS,
+  LOGIN_SETS_ASIDE,
   launchFor,
   loginState,
   loginStatus,
@@ -30,7 +31,6 @@ import {
   parseLoginStatus,
   resetLogin,
   startLogin,
-  submitLoginCode,
 } from "../src/auth";
 import { BINARY_PINS, binaryPath, binaryPlatform, fetchBinary, installedBinary } from "../src/binary";
 import { setClaudeAvailability } from "../src/cli";
@@ -215,19 +215,25 @@ test("the launch steers Claude Code through --settings, which beats its own file
     ANTHROPIC_BASE_URL: "http://env:1",
     ANTHROPIC_AUTH_TOKEN: "env-token",
     ANTHROPIC_API_KEY: "sk-env",
+    // The proxy's model names, which would rename the account's models.
+    ANTHROPIC_MODEL: "proxy-model",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-8",
+    ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "Sonnet 4.6",
+    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
   };
-  // The account: every proxy and key is cleared, in the flag and the environment.
+  // The account: every proxy, key and proxy model name is cleared, in the
+  // flag and the environment.
   const login = launchFor(await effectiveClaudeAuth(vals({ claudeAuth: "login" }), data, await token(), env), env);
   expect(login.mode).toBe("login");
   expect(login.apiBaseUrl).toBeUndefined();
-  expect(JSON.parse(login.extraArgs.settings!)).toEqual({
-    env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" },
-  });
+  expect(login.extraArgs.settings).toBe(ACCOUNT_SETTINGS);
+  const cleared = JSON.parse(ACCOUNT_SETTINGS).env as Record<string, string>;
+  expect(Object.keys(cleared)).toEqual([...LOGIN_SETS_ASIDE]);
+  expect(cleared).toMatchObject({ ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "", ANTHROPIC_MODEL: "", ANTHROPIC_DEFAULT_OPUS_MODEL: "" });
+  expect(Object.values(cleared).every((v) => v === "")).toBe(true);
   expect(login.env.CLAUDECODE).toBeUndefined();
   expect(login.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
-  expect(login.env.ANTHROPIC_BASE_URL).toBeUndefined();
-  expect(login.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
-  expect(login.env.ANTHROPIC_API_KEY).toBeUndefined();
+  for (const name of LOGIN_SETS_ASIDE) expect(login.env[name]).toBeUndefined();
   expect(login.env.PATH).toBe("/bin");
 
   // The proxy: the app's url and token, and no key to pre-empt the token.
@@ -308,7 +314,7 @@ test("loginStatus asks the CLI without any key in its environment, and says miss
   });
   expect(status).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
   expect(calls[0]!.cmd).toBe("claude");
-  expect(calls[0]!.args).toEqual(["--settings", LOGIN_SETTINGS, "auth", "status", "--json"]);
+  expect(calls[0]!.args).toEqual(["--settings", ACCOUNT_SETTINGS, "auth", "status", "--json"]);
   expect(calls[0]!.env?.ANTHROPIC_API_KEY).toBeUndefined();
   setClaudeAvailability(() => false);
   expect(await loginStatus()).toEqual({ loggedIn: false, method: "missing", email: null });
@@ -326,7 +332,7 @@ test("a bearer token in Claude Code's settings file is not a sign-in: the CLI is
     const cleared = settings?.env?.ANTHROPIC_AUTH_TOKEN === "";
     return { exitCode: 0, stdout: cleared ? '{"loggedIn":false,"authMethod":"none"}' : '{"loggedIn":true,"authMethod":"oauth_token"}', stderr: "" };
   });
-  expect(calls[0]).toEqual(["--settings", LOGIN_SETTINGS, "auth", "status", "--json"]);
+  expect(calls[0]).toEqual(["--settings", ACCOUNT_SETTINGS, "auth", "status", "--json"]);
   expect(status).toEqual({ loggedIn: false, method: "none", email: null });
 });
 
@@ -358,8 +364,8 @@ esac
 exit 1
 `;
 
-// A stand-in whose browser never comes back: its login waits for the code
-// the sign-in page shows, the way Claude Code's does, and takes only one.
+// A stand-in whose CLI also offers to take a code from a sign-in page opened
+// by hand (a terminal's affair): the browser still comes back on its own.
 const FAKE_CLAUDE_CODE = `#!/bin/sh
 if [ "$1" = "--settings" ]; then shift 2; fi
 case "$1 $2" in
@@ -373,14 +379,13 @@ case "$1 $2" in
   "auth login")
     echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&login_hint=$4"
     printf "Paste code here if prompted > "
-    while read code; do
-      if [ "$code" = "good-code#state" ]; then echo "Login successful."; : > "$SPECDRIVEN_TEST_LOGIN_MARK"; exit 0; fi
-      case "$code" in
-        *#*) echo "Login failed: Request failed with status code 400" >&2; exit 1 ;;
-        *) echo "Invalid code. Please make sure the full code was copied." >&2 ;;
-      esac
-    done
-    exit 1 ;;
+    /bin/sleep 0.3
+    echo "Login successful."
+    : > "$SPECDRIVEN_TEST_LOGIN_MARK"
+    exit 0 ;;
+  "auth logout")
+    /bin/rm -f "$SPECDRIVEN_TEST_LOGIN_MARK"
+    exit 0 ;;
 esac
 exit 1
 `;
@@ -417,16 +422,25 @@ test("startLogin drives claude auth login, hands the page the url, and is done o
     email: "ada@example.com",
     url: started.url,
     download: null,
-    acceptsCode: false,
-    codeSent: false,
-    codeError: null,
     done: true,
     error: null,
   });
   expect(await loginStatus()).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
 
+  // Every step is in the app's log, under the plugin's component.
+  const said = (message: string) => {
+    const source = logSource();
+    return (source.kind === "memory" ? source.lines : []).filter((l) => l.includes(`[agent-claude] ${message}`));
+  };
+  expect(said("sign-in started").at(-1)).toContain('email="ada@example.com"');
+  expect(said("sign-in CLI started").at(-1)).toContain("pid=");
+  expect(said("sign-in page printed").at(-1)).toContain('url="https://claude.ai/oauth/authorize?email=ada@example.com&code=abc"');
+  expect(said("sign-in CLI exited").at(-1)).toContain("exit=0");
+  expect(said("sign-in done").at(-1)).toContain('email="ada@example.com"');
+
   await logout();
   expect((await loginStatus()).loggedIn).toBe(false);
+  expect(said("signed out").length).toBe(1);
 });
 
 test("a sign-in can be cancelled, and a bad email or a platform with no Claude Code is refused", async () => {
@@ -447,59 +461,22 @@ test("a sign-in can be cancelled, and a bad email or a platform with no Claude C
   expect(loginState()!.error).toContain("timed out");
 });
 
-test("a sign-in page opened from the printed link finishes with the code it shows, pasted in", async () => {
+test("a sign-in finishes in the browser alone: a CLI that also offers to take a code gets none, and the ended sign-in is logged", async () => {
   await fakeClaudeOnPath(FAKE_CLAUDE_CODE);
-  const submit = (code: string) => refused(Promise.resolve().then(() => submitLoginCode(code)));
-  expect(await submit("good-code#state")).toBe(409); // no sign-in under way
-
   const started = await startLogin("ada@example.com", { pollMs: 50 });
   expect(started.url).toBe("https://claude.com/cai/oauth/authorize?code=true&login_hint=ada@example.com");
-  await settle(() => loginState()!.acceptsCode);
-  expect(loginState()!.acceptsCode).toBe(true);
-  expect(await submit("   ")).toBe(400);
-  expect(await submit("two words")).toBe(400);
-  // A code pasted incomplete the CLI refuses but waits past: the page
-  // learns its words and the sign-in takes another code — it does not
-  // sit there looking as if nothing happened.
-  expect(submitLoginCode("half-a-code")).toMatchObject({ inProgress: true, codeSent: true, codeError: null });
-  expect(await submit("another")).toBe(409); // one at a time, until the CLI answers
-  await settle(() => loginState()!.codeError !== null);
-  expect(loginState()).toMatchObject({
-    inProgress: true,
-    acceptsCode: true,
-    codeSent: false,
-    codeError: "Invalid code. Please make sure the full code was copied.",
-  });
-  // A code the CLI gives up on ends the sign-in with its words.
-  expect(submitLoginCode("stale-code#state")).toMatchObject({ inProgress: true, codeSent: true, codeError: null });
+  expect(started).not.toHaveProperty("acceptsCode");
   await settle(() => !loginState()!.inProgress);
-  expect(loginState()).toMatchObject({ done: false, acceptsCode: false, codeSent: false, error: expect.stringContaining("status code 400") });
-
-  // The right one signs in.
-  await startLogin("ada@example.com", { pollMs: 50 });
-  await settle(() => loginState()!.acceptsCode);
-  submitLoginCode("  good-code#state ");
-  await settle(() => !loginState()!.inProgress);
-  expect(loginState()).toMatchObject({ done: true, error: null, codeSent: false });
+  expect(loginState()).toMatchObject({ done: true, error: null });
   expect(await loginStatus()).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
 
-  // Every step is in the app's log, under the plugin's component — the
-  // code itself never.
-  const source = logSource();
-  const lines = (source.kind === "memory" ? source.lines : []).filter((l) => l.includes("[agent-claude]"));
-  const said = (message: string) => lines.filter((l) => l.includes(` ${message}`));
-  expect(said("sign-in started").at(-1)).toContain('email="ada@example.com"');
-  expect(said("sign-in page printed").at(-1)).toContain("login_hint=ada@example.com");
-  expect(said("sign-in takes the code from the sign-in page").length).toBeGreaterThan(0);
-  expect(said("sign-in code handed to the CLI").at(-1)).toContain("length=15 wellFormed=true");
-  expect(said("sign-in code refused by the CLI").map((l) => /reply="([^"]*)"/.exec(l)?.[1])).toEqual([
-    "Invalid code. Please make sure the full code was copied.",
-    "Login failed: Request failed with status code 400",
-  ]);
-  expect(said("sign-in ended without a login").at(-1)).toContain("status code 400");
-  expect(said("sign-in CLI exited").at(-1)).toContain("exit=0");
-  expect(said("sign-in done").at(-1)).toContain('email="ada@example.com"');
-  expect(lines.some((l) => l.includes("good-code#state") || l.includes("half-a-code"))).toBe(false);
+  // A browser that never comes back ends with the CLI's last words, logged.
+  await logout();
+  await startLogin("ada@example.com", { pollMs: 1000, timeoutMs: 100, urlWaitMs: 10 });
+  await settle(() => !loginState()!.inProgress);
+  expect(loginState()!.error).toContain("timed out");
+  const lines = (logSource() as { lines?: readonly string[] }).lines ?? [];
+  expect(lines.filter((l) => l.includes("[agent-claude] sign-in ended without a login")).at(-1)).toContain("timed out");
 });
 
 test("with no Claude Code anywhere, the email sign-in fetches this platform's first, then signs in with it", async () => {
@@ -705,9 +682,7 @@ test("GET /api/claude/models lists the signed-in account's models, asked of Clau
   const { prompt, options } = asked[0]!;
   expect(options).toMatchObject({ tools: [], settingSources: [], persistSession: false });
   expect(options.abortController!.signal.aborted).toBe(true);
-  expect(JSON.parse(String(options.extraArgs!.settings))).toEqual({
-    env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" },
-  });
+  expect(JSON.parse(String(options.extraArgs!.settings))).toEqual(JSON.parse(ACCOUNT_SETTINGS));
   const sent: unknown[] = [];
   for await (const m of prompt) sent.push(m);
   expect(sent).toEqual([]);
@@ -802,27 +777,11 @@ test.if(typeof (agents as { changed?: unknown }).changed === "function")(
   },
 );
 
-test("POST /api/claude/login/code hands the CLI the code from the sign-in page", async () => {
+test("there is no route for a sign-in code: the browser finishes the sign-in, the page only polls", async () => {
   await fakeClaudeOnPath(FAKE_CLAUDE_CODE);
-  expect((await call("POST", "/api/claude/login/code", { code: "good-code#state" })).status).toBe(409);
   await call("POST", "/api/claude/login", { email: "ada@example.com" });
-  await settle(() => loginState()!.acceptsCode);
-  expect((await call("GET", "/api/claude/login")).body.signIn).toMatchObject({ inProgress: true, acceptsCode: true });
-  expect((await call("POST", "/api/claude/login/code", {})).status).toBe(400);
-  // A code the CLI refuses and waits past comes back to the page's poll.
-  const half = await call("POST", "/api/claude/login/code", { code: "half-a-code" });
-  expect(half.status).toBe(200);
-  expect(half.body.signIn).toMatchObject({ inProgress: true, codeSent: true, codeError: null });
-  await settle(() => loginState()!.codeError !== null);
-  expect((await call("GET", "/api/claude/login")).body.signIn).toMatchObject({
-    inProgress: true,
-    acceptsCode: true,
-    codeSent: false,
-    codeError: "Invalid code. Please make sure the full code was copied.",
-  });
-  const sent = await call("POST", "/api/claude/login/code", { code: "good-code#state" });
-  expect(sent.status).toBe(200);
-  expect(sent.body.signIn).toMatchObject({ codeSent: true, codeError: null });
+  // No such route: the app has nothing to answer it with.
+  expect(await handleApi(new Request("http://localhost/api/claude/login/code", { method: "POST", body: "{}" }))).toBeNull();
   await settle(() => !loginState()!.inProgress);
   expect((await call("GET", "/api/claude/login")).body).toMatchObject({
     signIn: { done: true },

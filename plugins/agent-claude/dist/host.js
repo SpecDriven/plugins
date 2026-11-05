@@ -44915,14 +44915,28 @@ async function effectiveClaudeAuth(own, cwd, storedToken, env = process.env) {
     storedToken: storedToken !== null
   };
 }
-var LOGIN_SETTINGS = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" } });
+var LOGIN_SETS_ASIDE = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "ANTHROPIC_DEFAULT_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+  "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
+];
+var ACCOUNT_SETTINGS = JSON.stringify({ env: Object.fromEntries(LOGIN_SETS_ASIDE.map((name) => [name, ""])) });
 function launchFor(auth, env = process.env) {
   const processEnv = claudeProcessEnv(env);
   if (auth.mode === "login") {
-    delete processEnv.ANTHROPIC_BASE_URL;
-    delete processEnv.ANTHROPIC_AUTH_TOKEN;
-    delete processEnv.ANTHROPIC_API_KEY;
-    return { mode: "login", env: processEnv, extraArgs: { settings: LOGIN_SETTINGS }, apiBaseUrl: undefined };
+    for (const name of LOGIN_SETS_ASIDE)
+      delete processEnv[name];
+    return { mode: "login", env: processEnv, extraArgs: { settings: ACCOUNT_SETTINGS }, apiBaseUrl: undefined };
   }
   if (!auth.proxy) {
     return { mode: "proxy", env: processEnv, extraArgs: {}, apiBaseUrl: undefined };
@@ -44957,9 +44971,9 @@ async function loginStatus(runner = run) {
   if (!claude)
     return { loggedIn: false, method: "missing", email: null };
   const env = claudeProcessEnv();
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
-  const result = await runner(claude, ["--settings", LOGIN_SETTINGS, "auth", "status", "--json"], { env });
+  for (const name of LOGIN_SETS_ASIDE)
+    delete env[name];
+  const result = await runner(claude, ["--settings", ACCOUNT_SETTINGS, "auth", "status", "--json"], { env });
   if (result.exitCode !== 0 && !result.stdout.trim()) {
     log.warn("claude auth status gave no answer", { claude, exit: result.exitCode, stderr: result.stderr.trim().slice(-300) });
     return { loggedIn: false, method: "unknown", email: null };
@@ -44996,9 +45010,6 @@ function publicState(f) {
     email: f.email,
     url: f.url,
     download: download2,
-    acceptsCode: f.acceptsCode && f.inProgress,
-    codeSent: f.codeSent && f.inProgress,
-    codeError: f.codeError,
     done: f.done,
     error: f.error
   };
@@ -45050,9 +45061,6 @@ async function startLogin(email, deps = {}) {
     url: null,
     downloading: !claude,
     fetched: false,
-    acceptsCode: false,
-    codeSent: false,
-    codeError: null,
     done: false,
     error: null,
     child: null,
@@ -45075,7 +45083,6 @@ async function startLogin(email, deps = {}) {
   }, (e) => finish(f, e.message));
   return publicState(f);
 }
-var REFUSED_CODE = /invalid|not accepted|incomplete|expired|already used|incorrect|wrong|failed|error/i;
 async function launchLogin(f, claude, deps) {
   const address = f.email;
   const status = deps.status ?? (() => loginStatus());
@@ -45098,10 +45105,6 @@ async function launchLogin(f, claude, deps) {
     f.output = [...f.output, ...lines].slice(-20);
     for (const line of lines)
       log.debug("sign-in CLI output", { stream, line });
-    if (!f.acceptsCode && /paste (the )?code/i.test(text)) {
-      f.acceptsCode = true;
-      log.info("sign-in takes the code from the sign-in page");
-    }
     if (!f.url) {
       const match = /https:\/\/[^\s'"<>)\]]+/.exec(text);
       if (match) {
@@ -45109,14 +45112,6 @@ async function launchLogin(f, claude, deps) {
         log.info("sign-in page printed", { url: f.url });
         for (const wake of f.urlWaiters.splice(0))
           wake();
-      }
-    }
-    if (f.codeSent) {
-      const refusal = lines.find((line) => REFUSED_CODE.test(line));
-      if (refusal) {
-        f.codeSent = false;
-        f.codeError = refusal;
-        log.warn("sign-in code refused by the CLI", { reply: refusal, stream });
       }
     }
   };
@@ -45127,7 +45122,7 @@ async function launchLogin(f, claude, deps) {
     finish(f, `Could not start the Claude CLI: ${e.message}`);
   });
   child.on("exit", (code, signal) => {
-    log.info("sign-in CLI exited", { exit: code ?? signal ?? "?", codeSent: f.codeSent, lastOutput: f.output.slice(-2).join(" | ") });
+    log.info("sign-in CLI exited", { exit: code ?? signal ?? "?", lastOutput: f.output.slice(-2).join(" | ") });
     if (!f.inProgress)
       return;
     status().then((s) => {
@@ -45159,35 +45154,6 @@ async function launchLogin(f, claude, deps) {
       return resolve();
     f.urlWaiters.push(resolve);
     setTimeout(resolve, deps.urlWaitMs ?? URL_WAIT_MS);
-  });
-  return publicState(f);
-}
-var CODE = /^\S{1,4096}$/;
-function submitLoginCode(code) {
-  const value = code.trim();
-  if (!CODE.test(value))
-    throw new ClaudeAuthError("Paste the code the sign-in page shows", 400);
-  const f = flow;
-  const input = f?.inProgress ? f.child?.stdin : null;
-  if (!f || !f.acceptsCode || !input || input.destroyed) {
-    log.warn("sign-in code arrived with no sign-in waiting for one", {
-      inProgress: f?.inProgress ?? false,
-      acceptsCode: f?.acceptsCode ?? false,
-      stdin: input ? input.destroyed ? "closed" : "open" : "none"
-    });
-    throw new ClaudeAuthError("No sign-in is waiting for a code", 409);
-  }
-  if (f.codeSent)
-    throw new ClaudeAuthError("The last code is still being checked", 409);
-  f.codeSent = true;
-  f.codeError = null;
-  log.info("sign-in code handed to the CLI", { length: value.length, wellFormed: value.includes("#") });
-  input.write(`${value}
-`, (e) => {
-    if (e) {
-      log.warn("sign-in code could not be written to the CLI", { error: e.message });
-      finish(f, `Could not hand the code to the Claude CLI: ${e.message}`);
-    }
   });
   return publicState(f);
 }
@@ -45965,14 +45931,27 @@ function effortsOf(row) {
 }
 var ACCOUNT_MODELS_TIMEOUT_MS = 20000;
 var ACCOUNT_MODELS_TTL_MS = 10 * 60000;
+function modelFamily(value) {
+  if (!value.includes("-"))
+    return value.toLowerCase();
+  const match = /^claude-([a-z]+)/i.exec(value);
+  return match ? match[1].toLowerCase() : null;
+}
 function accountModelsOf(rows) {
   if (!Array.isArray(rows))
     return [];
   const models = [];
+  const families = new Set;
   for (const row of rows) {
     const value = normalizeDefaultModel(row?.value);
     if (!value || models.some((m2) => m2.value === value))
       continue;
+    const family = modelFamily(value);
+    if (family) {
+      if (families.has(family))
+        continue;
+      families.add(family);
+    }
     const resolved = normalizeDefaultModel(row.resolvedModel);
     const efforts = effortsOf(row);
     models.push({
@@ -46300,14 +46279,6 @@ ${token ?? ""}`;
         return claudeFailure("sign-in", e);
       }
     };
-    const postLoginCode = async (req) => {
-      const body = await req.json().catch(() => ({}));
-      try {
-        return json({ signIn: submitLoginCode(typeof body.code === "string" ? body.code : "") });
-      } catch (e) {
-        return claudeFailure("sign-in code", e);
-      }
-    };
     const getLogin = async () => json({ signIn: loginState(), login: await loginStatus() });
     const deleteLogin = () => json({ signIn: cancelLogin() });
     const postLogout = async () => {
@@ -46355,7 +46326,6 @@ ${token ?? ""}`;
     add("POST", "/api/claude/proxy/check", postProxyCheck);
     add("POST", "/api/claude/login", postLogin);
     add("GET", "/api/claude/login", getLogin);
-    add("POST", "/api/claude/login/code", postLoginCode);
     add("DELETE", "/api/claude/login", deleteLogin);
     add("POST", "/api/claude/logout", postLogout);
     add("POST", "/api/claude/login/check", postLoginCheck);
@@ -46371,5 +46341,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=E2B64CD961621C1E64756E2164756E21
+//# debugId=D1B927618D3B424A64756E2164756E21
 //# sourceMappingURL=host.js.map

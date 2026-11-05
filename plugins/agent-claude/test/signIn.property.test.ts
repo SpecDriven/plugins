@@ -15,7 +15,8 @@ import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
 import { applyPluginPatch } from "@specdriven/app/src/plugins/host/pluginSettings";
 import {
-  LOGIN_SETTINGS,
+  ACCOUNT_SETTINGS,
+  LOGIN_SETS_ASIDE,
   cancelLogin,
   checkProxy,
   claudeProcessEnv,
@@ -28,7 +29,7 @@ import {
   startLogin,
   type EffectiveClaudeAuth,
 } from "../src/auth";
-import { accountModels, accountModelsOf, forgetAccountModels, type AccountProbe } from "../src/accountModels";
+import { accountModels, accountModelsOf, forgetAccountModels, modelFamily, type AccountProbe } from "../src/accountModels";
 import { fetchProxyModels, proxyModelsOf } from "../src/proxyModels";
 import {
   CLAUDE_EFFORTS,
@@ -112,7 +113,7 @@ const section = gs.record({
 /** An environment with the variables the sign-in cares about, and others. */
 const environment = gs.composite<Env>((tc) => {
   const env: Env = {};
-  for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_OAUTH_TOKEN"]) {
+  for (const name of [...LOGIN_SETS_ASIDE, "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_OAUTH_TOKEN"]) {
     const value = tc.draw(envValue);
     if (value !== undefined) env[name] = value;
   }
@@ -212,7 +213,8 @@ test(
 
 // --- the launch each sign-in gets ----------------------------------------------
 
-const SIGN_IN_VARS = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
+/** What the account sign-in sets aside: the proxy and keys, and the proxy's model names. */
+const SIGN_IN_VARS: readonly string[] = LOGIN_SETS_ASIDE;
 const NESTING_VARS = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"];
 
 const detectedProxy = gs.record({
@@ -251,13 +253,16 @@ test("every launch drops the markers that make a nested claude refuse to start, 
     }
   }, PURE));
 
-test("the account sign-in sets every proxy and key aside, in the environment and through --settings", () =>
+test("the account sign-in sets every proxy, key and proxy model name aside, in the environment and through --settings", () =>
   hegel.test((tc) => {
     const env = tc.draw(environment);
     const launch = launchFor(tc.draw(settled("login")), env);
     for (const name of SIGN_IN_VARS) expect(launch.env).not.toHaveProperty(name);
-    expect(launch.extraArgs).toEqual({ settings: LOGIN_SETTINGS });
-    expect(JSON.parse(LOGIN_SETTINGS)).toEqual({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" } });
+    expect(launch.extraArgs).toEqual({ settings: ACCOUNT_SETTINGS });
+    expect(JSON.parse(ACCOUNT_SETTINGS)).toEqual({ env: Object.fromEntries(SIGN_IN_VARS.map((name) => [name, ""])) });
+    for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL"]) {
+      expect(SIGN_IN_VARS).toContain(name);
+    }
     expect(launch.apiBaseUrl).toBeUndefined();
   }, PURE));
 
@@ -572,7 +577,19 @@ test("a proxy that refuses the token or answers an error status lists nothing an
     if (token) expect(error!.message).not.toContain(token);
   }, PURE));
 
-test("the account's model menu keeps each valid model once, and its efforts are Claude's levels in order", () =>
+/** The first value of each model family, in order; a value with no family stands alone. */
+const firstPerFamily = (values: string[]): string[] => {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const family = modelFamily(value);
+    if (family === null) return true;
+    if (seen.has(family)) return false;
+    seen.add(family);
+    return true;
+  });
+};
+
+test("the account's model menu keeps one valid model per family, the first listed, and its efforts are Claude's levels in order", () =>
   hegel.test((tc) => {
     const rows = tc.draw(
       gs.arrays(
@@ -591,7 +608,7 @@ test("the account's model menu keeps each valid model once, and its efforts are 
     );
     const models = accountModelsOf(rows);
     const values_ = rows.map((r) => (r && typeof r === "object" ? (r as { value?: unknown }).value : undefined));
-    expect(models.map((m) => m.value)).toEqual(firstAppearances(values_));
+    expect(models.map((m) => m.value)).toEqual(firstPerFamily(firstAppearances(values_)));
     for (const m of models) {
       const row = rows.find((r) => r && typeof r === "object" && normalizeDefaultModel((r as { value?: unknown }).value) === m.value) as Record<string, unknown>;
       if (row.supportsEffort === false) expect(m.efforts).toEqual([]);

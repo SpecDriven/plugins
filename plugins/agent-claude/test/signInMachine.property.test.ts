@@ -26,7 +26,7 @@ import { pluginSection } from "@specdriven/app/src/plugins/host/pluginSettings";
 import { secretStore, setSecretBackend } from "@specdriven/app/src/server/secrets";
 import { readState, writeState } from "@specdriven/app/src/server/state";
 import { linkExecutable } from "@specdriven/app/tests/helpers/fakeBin";
-import { LOGIN_SETTINGS, claudeLaunch, loginState, resetLogin } from "../src/auth";
+import { ACCOUNT_SETTINGS, claudeLaunch, loginState, resetLogin } from "../src/auth";
 import { forgetAccountModels } from "../src/accountModels";
 import { setClaudeAvailability } from "../src/cli";
 import { setQueryFactory, type QueryLike } from "../src/provider";
@@ -423,7 +423,7 @@ const machine: hegel.stateful.StateMachine<Run> = {
         const launch = await claudeLaunch(own, run.data, stored);
         expect(launch.mode).toBe(effectiveMode(m));
         if (launch.mode === "login") {
-          expect(launch.extraArgs).toEqual({ settings: LOGIN_SETTINGS });
+          expect(launch.extraArgs).toEqual({ settings: ACCOUNT_SETTINGS });
           return;
         }
         const url = m.proxyUrl ?? m.fileUrl;
@@ -512,7 +512,7 @@ async function setUp(): Promise<Run & { restore: () => Promise<void> }> {
   // The Claude Code asked for the account's models: signed in as the
   // account and nothing else, it names whoever the CLI says.
   setQueryFactory(({ options }) => {
-    if (options.extraArgs?.settings !== LOGIN_SETTINGS) run.wrongLaunches.push(`account models asked with ${JSON.stringify(options.extraArgs)}`);
+    if (options.extraArgs?.settings !== ACCOUNT_SETTINGS) run.wrongLaunches.push(`account models asked with ${JSON.stringify(options.extraArgs)}`);
     return {
       accountInfo: async () => {
         const email = await readFile(run.mark, "utf8").catch(() => null);

@@ -16,6 +16,7 @@ import {
   ACCOUNT_MODELS_TTL_MS,
   accountModels,
   accountModelsOf,
+  modelFamily,
   fetchAccountModels,
   forgetAccountModels,
   type AccountModel,
@@ -189,12 +190,28 @@ test("Claude Code's model rows become account models, dropping what is no model 
       { value: "two words", displayName: "Bad", description: "" },
       { value: "haiku", resolvedModel: 4 },
       null,
+      // An organization's explicit ids of models already offered: one row
+      // per family, the first listed, so the menu stays short.
+      { value: "claude-opus-4-7", displayName: "Opus 4.7", description: "Best for everyday, complex tasks" },
+      { value: "claude-fable-5-1[1m]", resolvedModel: "claude-fable-5-1", displayName: "Fable", description: "Fable 5.1" },
+      { value: "claude-fable-5", displayName: "Fable 5", description: "" },
+      { value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "" },
+      { value: "us.anthropic.claude-sonnet-4-6:0", displayName: "Bedrock Sonnet", description: "" },
     ]),
   ).toEqual([
     { value: "opus", resolvedModel: "claude-opus-4-8", displayName: "Opus", description: "Opus 4.8" },
     { value: "haiku", displayName: "haiku", description: "" },
+    { value: "claude-fable-5-1[1m]", resolvedModel: "claude-fable-5-1", displayName: "Fable", description: "Fable 5.1" },
+    { value: "us.anthropic.claude-sonnet-4-6:0", displayName: "Bedrock Sonnet", description: "" },
   ]);
   expect(accountModelsOf(undefined)).toEqual([]);
+  expect(["default", "opus", "claude-opus-4-8[1m]", "claude-haiku-4-5-20251001", "us.anthropic.claude-sonnet-4-6:0"].map(modelFamily)).toEqual([
+    "default",
+    "opus",
+    "opus",
+    "haiku",
+    null,
+  ]);
 });
 
 test("an account model keeps the effort levels Claude Code lists for it", () => {
