@@ -14,6 +14,7 @@ import { agents } from "@specdriven/app/src/plugins/host/agents";
 import { pluginSection } from "@specdriven/app/src/plugins/host/pluginSettings";
 import { secretPath, secretStore, setSecretBackend } from "@specdriven/app/src/server/secrets";
 import { readState, writeState } from "@specdriven/app/src/server/state";
+import { logSource } from "@specdriven/app/src/server/telemetry";
 import { linkExecutable } from "@specdriven/app/tests/helpers/fakeBin";
 import {
   cancelLogin,
@@ -372,9 +373,13 @@ case "$1 $2" in
   "auth login")
     echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&login_hint=$4"
     printf "Paste code here if prompted > "
-    read code
-    if [ "$code" = "good-code#state" ]; then : > "$SPECDRIVEN_TEST_LOGIN_MARK"; exit 0; fi
-    echo "Login failed: Request failed with status code 400" >&2
+    while read code; do
+      if [ "$code" = "good-code#state" ]; then echo "Login successful."; : > "$SPECDRIVEN_TEST_LOGIN_MARK"; exit 0; fi
+      case "$code" in
+        *#*) echo "Login failed: Request failed with status code 400" >&2; exit 1 ;;
+        *) echo "Invalid code. Please make sure the full code was copied." >&2 ;;
+      esac
+    done
     exit 1 ;;
 esac
 exit 1
@@ -413,6 +418,8 @@ test("startLogin drives claude auth login, hands the page the url, and is done o
     url: started.url,
     download: null,
     acceptsCode: false,
+    codeSent: false,
+    codeError: null,
     done: true,
     error: null,
   });
@@ -451,18 +458,48 @@ test("a sign-in page opened from the printed link finishes with the code it show
   expect(loginState()!.acceptsCode).toBe(true);
   expect(await submit("   ")).toBe(400);
   expect(await submit("two words")).toBe(400);
-  // A code the CLI refuses ends the sign-in with its words.
-  expect(submitLoginCode("stale-code").inProgress).toBe(true);
+  // A code pasted incomplete the CLI refuses but waits past: the page
+  // learns its words and the sign-in takes another code — it does not
+  // sit there looking as if nothing happened.
+  expect(submitLoginCode("half-a-code")).toMatchObject({ inProgress: true, codeSent: true, codeError: null });
+  expect(await submit("another")).toBe(409); // one at a time, until the CLI answers
+  await settle(() => loginState()!.codeError !== null);
+  expect(loginState()).toMatchObject({
+    inProgress: true,
+    acceptsCode: true,
+    codeSent: false,
+    codeError: "Invalid code. Please make sure the full code was copied.",
+  });
+  // A code the CLI gives up on ends the sign-in with its words.
+  expect(submitLoginCode("stale-code#state")).toMatchObject({ inProgress: true, codeSent: true, codeError: null });
   await settle(() => !loginState()!.inProgress);
-  expect(loginState()).toMatchObject({ done: false, acceptsCode: false, error: expect.stringContaining("status code 400") });
+  expect(loginState()).toMatchObject({ done: false, acceptsCode: false, codeSent: false, error: expect.stringContaining("status code 400") });
 
   // The right one signs in.
   await startLogin("ada@example.com", { pollMs: 50 });
   await settle(() => loginState()!.acceptsCode);
   submitLoginCode("  good-code#state ");
   await settle(() => !loginState()!.inProgress);
-  expect(loginState()).toMatchObject({ done: true, error: null });
+  expect(loginState()).toMatchObject({ done: true, error: null, codeSent: false });
   expect(await loginStatus()).toEqual({ loggedIn: true, method: "claude.ai", email: "ada@example.com" });
+
+  // Every step is in the app's log, under the plugin's component — the
+  // code itself never.
+  const source = logSource();
+  const lines = (source.kind === "memory" ? source.lines : []).filter((l) => l.includes("[agent-claude]"));
+  const said = (message: string) => lines.filter((l) => l.includes(` ${message}`));
+  expect(said("sign-in started").at(-1)).toContain('email="ada@example.com"');
+  expect(said("sign-in page printed").at(-1)).toContain("login_hint=ada@example.com");
+  expect(said("sign-in takes the code from the sign-in page").length).toBeGreaterThan(0);
+  expect(said("sign-in code handed to the CLI").at(-1)).toContain("length=15 wellFormed=true");
+  expect(said("sign-in code refused by the CLI").map((l) => /reply="([^"]*)"/.exec(l)?.[1])).toEqual([
+    "Invalid code. Please make sure the full code was copied.",
+    "Login failed: Request failed with status code 400",
+  ]);
+  expect(said("sign-in ended without a login").at(-1)).toContain("status code 400");
+  expect(said("sign-in CLI exited").at(-1)).toContain("exit=0");
+  expect(said("sign-in done").at(-1)).toContain('email="ada@example.com"');
+  expect(lines.some((l) => l.includes("good-code#state") || l.includes("half-a-code"))).toBe(false);
 });
 
 test("with no Claude Code anywhere, the email sign-in fetches this platform's first, then signs in with it", async () => {
@@ -744,8 +781,20 @@ test("POST /api/claude/login/code hands the CLI the code from the sign-in page",
   await settle(() => loginState()!.acceptsCode);
   expect((await call("GET", "/api/claude/login")).body.signIn).toMatchObject({ inProgress: true, acceptsCode: true });
   expect((await call("POST", "/api/claude/login/code", {})).status).toBe(400);
+  // A code the CLI refuses and waits past comes back to the page's poll.
+  const half = await call("POST", "/api/claude/login/code", { code: "half-a-code" });
+  expect(half.status).toBe(200);
+  expect(half.body.signIn).toMatchObject({ inProgress: true, codeSent: true, codeError: null });
+  await settle(() => loginState()!.codeError !== null);
+  expect((await call("GET", "/api/claude/login")).body.signIn).toMatchObject({
+    inProgress: true,
+    acceptsCode: true,
+    codeSent: false,
+    codeError: "Invalid code. Please make sure the full code was copied.",
+  });
   const sent = await call("POST", "/api/claude/login/code", { code: "good-code#state" });
   expect(sent.status).toBe(200);
+  expect(sent.body.signIn).toMatchObject({ codeSent: true, codeError: null });
   await settle(() => !loginState()!.inProgress);
   expect((await call("GET", "/api/claude/login")).body).toMatchObject({
     signIn: { done: true },
