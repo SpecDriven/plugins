@@ -30,7 +30,7 @@ import type { AccountModel, AccountProbe } from "./accountModels";
 import { fetchProxyModels } from "./proxyModels";
 import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
-import { listedClaudeModels } from "./models";
+import { listedClaudeModels, withReportedModels } from "./models";
 import { createClaudeProvider } from "./provider";
 import { ADOPTED_KEY, CLAUDE_LEGACY_KEYS, claudeSettingsOf, claudeSettingsPatch } from "./settings";
 import type { ClaudeSettingsValues } from "./settings";
@@ -112,7 +112,7 @@ const plugin: Plugin<Context, HostConfig> = {
 
     ctx.effect(() =>
       agents.register(
-        createClaudeProvider({
+        withReportedModels(createClaudeProvider({
           settings,
           token: () => storedToken(secrets),
           listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
@@ -124,6 +124,8 @@ const plugin: Plugin<Context, HostConfig> = {
             await config.settings.write(parsed.patch);
           },
         }),
+        // The app checks the data repo's list for Claude against these.
+        () => offeredModels()),
       ),
     );
 

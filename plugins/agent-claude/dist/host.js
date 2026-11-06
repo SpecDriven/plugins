@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -46065,19 +46065,45 @@ async function fetchProxyModels(url, token, fetchFn = fetch, timeoutMs = PROXY_M
 // src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
+var CLAUDE_MODELS_FILE = ".specdriven/claude-models.json";
 var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
+async function readJson(path) {
+  return JSON.parse(await readFile3(path, "utf8"));
+}
 async function listedClaudeModels(dataDir) {
   if (!dataDir)
     return [];
+  let list;
   try {
-    const file = JSON.parse(await readFile3(join7(dataDir, AGENT_MODELS_FILE), "utf8"));
-    const list = file?.claude;
-    if (!Array.isArray(list))
+    list = await readJson(join7(dataDir, CLAUDE_MODELS_FILE));
+  } catch (e) {
+    if (e.code !== "ENOENT")
       return [];
-    return list.map(normalizeDefaultModel).filter((m2) => m2 !== null);
-  } catch {
-    return [];
+    try {
+      list = (await readJson(join7(dataDir, AGENT_MODELS_FILE)))?.claude;
+    } catch {
+      return [];
+    }
   }
+  if (!Array.isArray(list))
+    return [];
+  return list.map(normalizeDefaultModel).filter((m2) => m2 !== null);
+}
+function withReportedModels(provider, offered) {
+  return Object.assign(provider, {
+    async reportedModels() {
+      const models = await offered().catch(() => []);
+      if (models.length === 0)
+        return null;
+      const names = new Set;
+      for (const m2 of models) {
+        names.add(m2.value);
+        if (m2.resolvedModel)
+          names.add(m2.resolvedModel);
+      }
+      return [...names];
+    }
+  });
 }
 
 // src/host.ts
@@ -46137,7 +46163,7 @@ var plugin = {
     const data = ctx.need("data");
     const secrets = config.secrets(TOKEN_STORE);
     const settings = async () => claudeSettingsOf(await config.settings.read());
-    ctx.effect(() => agents2.register(createClaudeProvider({
+    ctx.effect(() => agents2.register(withReportedModels(createClaudeProvider({
       settings,
       token: () => storedToken(secrets),
       listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
@@ -46148,7 +46174,7 @@ var plugin = {
           throw new AgentError(400, parsed.error);
         await config.settings.write(parsed.patch);
       }
-    })));
+    }), () => offeredModels())));
     const signInChanged2 = () => {
       forgetAccountModels();
       agents2.changed?.("claude");
@@ -46307,5 +46333,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=189FDE4C1FDC203864756E2164756E21
+//# debugId=00F26B4B103F5A2F64756E2164756E21
 //# sourceMappingURL=host.js.map
