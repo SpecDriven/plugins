@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AccountModel, AccountProbe } from "../accountModels";
-import { narrowModels } from "../modelMenu";
+import { inList, narrowModels } from "../modelMenu";
 import {
   CLAUDE_EFFORTS,
   CLAUDE_MODEL_ALIASES,
@@ -113,7 +113,7 @@ const MODE_HINT: Record<ClaudeAuthMode, string> = {
 };
 
 /**
- * The models the data repo lists for Claude (Settings → AI agents, the app's
+ * The models the data repo lists for Claude (the "Claude models" list the app adds to this section, the app's
  * `.specdriven/agent-models.json`), from the state payload; null from an app
  * that keeps no lists, where the default model stays a free field.
  */
@@ -359,9 +359,11 @@ export function DefaultModel({
     // repo lists when it lists any. What a new Claude starts on: the
     // chosen one, else the menu's first.
     const menu: AccountModel[] = narrowModels(account, models ?? []).map((m) => ({ description: "", ...m }));
-    const shown = draft || menu[0]!.value;
-    // A default the menu lost stays on offer after it — the offered row
-    // when there is one, so it keeps its name.
+    // A default the list does not hold is not used: the menu's first is.
+    const shown = draft && inList(draft, account, models ?? []) ? draft : menu[0]!.value;
+    // With nothing listed, a default the account does not offer stays on
+    // offer after the menu — the offered row when there is one, so it
+    // keeps its name.
     const options = menu.some((m) => m.value === shown)
       ? menu
       : [...menu, account.find((m) => m.value === shown) ?? { value: shown, displayName: shown, description: "" }];
@@ -372,7 +374,7 @@ export function DefaultModel({
           Default model
           <span className="settings-row-hint">
             The model the coding agent pane and the app's other Claude calls start on, from the
-            models {offeredBy} offers{narrowed ? ", narrowed to the ones Settings → AI agents lists for Claude" : ""}.
+            models {offeredBy} offers{narrowed ? ", narrowed to the Claude models listed below" : ""}.
             Applies to sessions started after the change.
           </span>
         </span>
@@ -387,16 +389,17 @@ export function DefaultModel({
     );
   }
   if (models) {
-    const shown = draft || models[0] || "";
-    const options = shown && !models.includes(shown) ? [...models, shown] : models;
+    // A default the list does not hold is not used: the list's first is.
+    const shown = (draft && models.includes(draft) ? draft : models[0]) || "";
+    const options = models;
     return (
       <label className="settings-row">
         <span className="settings-row-label">
           Default model
           <span className="settings-row-hint">
             The model the coding agent pane and the app's other Claude calls start on, from the
-            models Settings → AI agents lists for Claude, the first until you choose another.
-            {shown ? "" : " List some there to choose one here; until then Claude Code chooses."} Applies to
+            Claude models listed below, the first until you choose another.
+            {shown ? "" : " List some below to choose one here; until then Claude Code chooses."} Applies to
             sessions started after the change.
           </span>
         </span>

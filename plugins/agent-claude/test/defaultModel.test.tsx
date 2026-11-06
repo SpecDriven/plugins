@@ -1,7 +1,7 @@
 // Settings → Claude's "Default model" (specs/agents/claude.feature.md "Choose
 // the model Claude starts on"): a dropdown of the models the sign-in offers —
 // the Claude account's, or the proxy's GET /v1/models — narrowed to the names
-// the app's Settings → AI agents lists for Claude when it lists any
+// the "Claude models" list the app adds to Settings → Claude names, when it names any
 // (specs/agents/agent-plugins.feature.md "Each agent offers the models the
 // data repo lists"), the first chosen until another is; with no such list and
 // nothing offered, the list alone, and the free field it was before in an app
@@ -20,7 +20,7 @@ import {
   forgetAccountModels,
   type AccountModel,
 } from "../src/accountModels";
-import { narrowModels } from "../src/modelMenu";
+import { inList, narrowModels } from "../src/modelMenu";
 import { AGENT_MODELS_FILE, listedClaudeModels } from "../src/models";
 import { fetchProxyModels, proxyModelsOf } from "../src/proxyModels";
 import type { QueryLike } from "../src/provider";
@@ -45,12 +45,12 @@ test("the default model is a dropdown of only the models the app lists for Claud
     '<select aria-label="Default Claude model"><option value="opus" selected="">opus</option><option value="sonnet">sonnet</option></select>',
   );
   expect(html("sonnet", ["opus", "sonnet"])).toContain('<option value="sonnet" selected="">sonnet</option>');
-  // A default the list no longer holds stays chosen, on offer after the list.
+  // A default the list does not hold is not used: the list's first is chosen.
   expect(html("haiku", ["opus"])).toContain(
-    '<option value="opus">opus</option><option value="haiku" selected="">haiku</option>',
+    '<select aria-label="Default Claude model"><option value="opus" selected="">opus</option></select>',
   );
   const none = html(null, []);
-  expect(none).toContain("List some there to choose one here");
+  expect(none).toContain("List some below to choose one here");
   expect(none).toContain(
     '<select aria-label="Default Claude model" disabled=""><option value="" selected="">No models listed</option></select>',
   );
@@ -108,7 +108,7 @@ test("signed in with a Claude account, the default model is a dropdown of every 
   expect(accountModelLabel({ value: "x", displayName: "x", description: "" }, ACCOUNT)).toBe("x");
 });
 
-test("the names Settings → AI agents lists narrow the offered models, in the list's order, the first chosen until another is", () => {
+test("the names Settings → Claude lists narrow the offered models, in the list's order, the first chosen until another is", () => {
   // Each listed name is the offered row for it — by value, or by the id an
   // alias resolves to — and a name offered under neither is kept bare.
   expect(narrowModels(ACCOUNT, ["haiku", "claude-opus-4-8", "my-model"])).toEqual([
@@ -118,16 +118,21 @@ test("the names Settings → AI agents lists narrow the offered models, in the l
   ]);
   expect(narrowModels(ACCOUNT, [])).toEqual(ACCOUNT);
   const narrowed = html(null, ["haiku", "opus"], ACCOUNT);
-  expect(narrowed).toContain("narrowed to the ones Settings → AI agents lists for Claude");
+  expect(narrowed).toContain("narrowed to the Claude models listed below");
   expect(narrowed).toContain(
     '<option value="haiku" selected="">Haiku — haiku</option><option value="opus" title="Opus 4.8 · Best for everyday, complex tasks · $5/$25 per Mtok">Opus 4.8 — opus</option>',
   );
   expect(narrowed).not.toContain('value="default"');
   expect(html("opus", ["haiku", "opus"], ACCOUNT)).toMatch(/<option value="opus"[^>]* selected="">Opus 4.8 — opus</);
-  // A default the narrowed menu lost stays chosen, on offer after it.
-  expect(html("default", ["haiku"], ACCOUNT)).toContain(
-    '<option value="haiku">Haiku — haiku</option><option value="default" title="Use the default model (currently Sonnet 4.6)" selected="">Use the default model (currently Sonnet 4.6) — default</option>',
-  );
+  // A default the list does not hold is not used: the narrowed menu's first
+  // is chosen, and nothing else is offered. The same model under its other
+  // name — an alias whose id is listed — is held.
+  const lost = html("default", ["haiku"], ACCOUNT);
+  expect(lost).toContain('<select aria-label="Default Claude model"><option value="haiku" selected="">Haiku — haiku</option></select>');
+  expect(html("opus", ["haiku", "claude-opus-4-8"], ACCOUNT)).toMatch(/<option value="opus"[^>]* selected="">Opus 4.8 — opus</);
+  expect(inList("claude-opus-4-8", ACCOUNT, ["opus"])).toBe(true);
+  expect(inList("default", ACCOUNT, ["opus"])).toBe(false);
+  expect(inList("anything", ACCOUNT, [])).toBe(true);
   // Behind a proxy the models are the proxy's, said so.
   const proxied = html(null, null, [{ value: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", description: "Claude Sonnet 4.6" }], "the proxy");
   expect(proxied).toContain("from the models the proxy offers.");

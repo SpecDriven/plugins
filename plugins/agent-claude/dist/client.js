@@ -76,6 +76,11 @@ function narrowModels(all, listed) {
   }
   return out;
 }
+function inList(model, all, listed) {
+  if (listed.length === 0 || listed.includes(model))
+    return true;
+  return narrowModels(all, listed).some((m3) => m3.value === model || m3.resolvedModel === model);
+}
 
 // src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
@@ -373,7 +378,7 @@ function DefaultModel({
   };
   if (account && account.length > 0) {
     const menu = narrowModels(account, models ?? []).map((m4) => ({ description: "", ...m4 }));
-    const shown = draft || menu[0].value;
+    const shown = draft && inList(draft, account, models ?? []) ? draft : menu[0].value;
     const options = menu.some((m4) => m4.value === shown) ? menu : [...menu, account.find((m4) => m4.value === shown) ?? { value: shown, displayName: shown, description: "" }];
     const narrowed = models !== null && models.length > 0;
     return /* @__PURE__ */ jsxs("label", {
@@ -389,7 +394,7 @@ function DefaultModel({
                 "The model the coding agent pane and the app's other Claude calls start on, from the models ",
                 offeredBy,
                 " offers",
-                narrowed ? ", narrowed to the ones Settings → AI agents lists for Claude" : "",
+                narrowed ? ", narrowed to the Claude models listed below" : "",
                 ". Applies to sessions started after the change."
               ]
             })
@@ -409,8 +414,8 @@ function DefaultModel({
     });
   }
   if (models) {
-    const shown = draft || models[0] || "";
-    const options = shown && !models.includes(shown) ? [...models, shown] : models;
+    const shown = (draft && models.includes(draft) ? draft : models[0]) || "";
+    const options = models;
     return /* @__PURE__ */ jsxs("label", {
       className: "settings-row",
       children: [
@@ -421,8 +426,8 @@ function DefaultModel({
             /* @__PURE__ */ jsxs("span", {
               className: "settings-row-hint",
               children: [
-                "The model the coding agent pane and the app's other Claude calls start on, from the models Settings → AI agents lists for Claude, the first until you choose another.",
-                shown ? "" : " List some there to choose one here; until then Claude Code chooses.",
+                "The model the coding agent pane and the app's other Claude calls start on, from the Claude models listed below, the first until you choose another.",
+                shown ? "" : " List some below to choose one here; until then Claude Code chooses.",
                 " Applies to sessions started after the change."
               ]
             })
@@ -1030,5 +1035,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=9097DDE1A516775A64756E2164756E21
+//# debugId=C132AE543D271E1D64756E2164756E21
 //# sourceMappingURL=client.js.map
