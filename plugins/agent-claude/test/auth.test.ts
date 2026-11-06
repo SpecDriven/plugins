@@ -746,9 +746,8 @@ test("GET /api/claude/models lists the signed-in account's models, asked of Clau
     await call("POST", "/api/claude/proxy/check", {});
     await call("GET", "/api/claude/models");
     expect(listed_).toBe(4);
-    // The pane's menu is the proxy's list too.
-    const choices = (await handleApi(new Request("http://localhost/api/agent/agents/claude/choices"))) as Response;
-    expect(((await choices.json()) as { choices: { models: { value: string }[] } }).choices.models.map((m) => m.value)).toEqual(["claude-sonnet-4-6"]);
+    // The pane's menu is the proxy's list too: pane.test.ts, under an app
+    // that has the bar (the floor app has no choices route).
   } finally {
     proxy.stop(true);
   }
