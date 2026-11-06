@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/host.ts
+// src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44571,20 +44571,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/binaries.json
+// src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44599,7 +44599,7 @@ var binaries_default = {
   }
 };
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44727,7 +44727,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/cli.ts
+// src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44739,7 +44739,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44846,7 +44846,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 var log = getLogger("agent-claude");
 
 class ClaudeAuthError extends Error {
@@ -45231,7 +45231,19 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/provider.ts
+// src/modelMenu.ts
+function narrowModels(all, listed) {
+  if (listed.length === 0)
+    return [...all];
+  const out = [];
+  for (const name of listed) {
+    const row = all.find((m2) => m2.value === name) ?? all.find((m2) => m2.resolvedModel === name);
+    out.push(row ?? { value: name, displayName: name, description: "" });
+  }
+  return out;
+}
+
+// src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45846,15 +45858,15 @@ function createClaudeProvider(options = {}) {
     },
     async choices() {
       const own = await settings();
-      const account = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => []);
-      const listed = account.length > 0 ? [] : await listedModels();
-      const models = account.length > 0 ? account.map((m2) => ({
+      const offered = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => []);
+      const all = offered.length > 0 ? offered.map((m2) => ({
         value: m2.value,
         ...m2.resolvedModel ? { resolvedModel: m2.resolvedModel } : {},
         displayName: m2.displayName,
         ...m2.description ? { description: m2.description } : {},
         ...m2.efforts ? { efforts: m2.efforts } : {}
-      })) : listed.length > 0 ? listed.map((m2) => ({ value: m2, displayName: m2 })) : ALIAS_MENU;
+      })) : ALIAS_MENU;
+      const models = narrowModels(all, await listedModels()).map((m2) => ("description" in m2) && m2.description === "" ? { value: m2.value, displayName: m2.displayName } : m2);
       return { models, model: await defaultModel(own), effort: own.defaultEffort };
     },
     async setDefaults(patch) {
@@ -45916,7 +45928,7 @@ function createClaudeProvider(options = {}) {
   };
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/accountModels.ts
+// src/accountModels.ts
 function effortsOf(row) {
   if (row.supportsEffort === false)
     return [];
@@ -46003,7 +46015,54 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/models.ts
+// src/proxyModels.ts
+var PROXY_MODELS_TIMEOUT_MS = 1e4;
+var MAX_PROXY_MODELS = 200;
+function proxyModelsOf(rows, into = []) {
+  if (!Array.isArray(rows))
+    return into;
+  for (const row of rows) {
+    const value = normalizeDefaultModel(row?.id);
+    if (!value || into.some((m2) => m2.value === value))
+      continue;
+    const name = typeof row.display_name === "string" && row.display_name.trim() ? row.display_name.trim() : value;
+    into.push({ value, displayName: name, description: name !== value ? name : "" });
+    if (into.length === MAX_PROXY_MODELS)
+      break;
+  }
+  return into;
+}
+async function fetchProxyModels(url, token, fetchFn = fetch, timeoutMs = PROXY_MODELS_TIMEOUT_MS) {
+  const base = url.endsWith("/") ? url : `${url}/`;
+  const headers = { "anthropic-version": "2023-06-01" };
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+    headers["x-api-key"] = token;
+  }
+  const models = [];
+  let after = null;
+  for (let page = 0;page < 10; page++) {
+    const target = new URL("v1/models", base);
+    target.searchParams.set("limit", "100");
+    if (after)
+      target.searchParams.set("after_id", after);
+    const res = await fetchFn(target, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(token ? `The proxy refused the token (HTTP ${res.status})` : `The proxy wants a token (HTTP ${res.status})`);
+    }
+    if (!res.ok)
+      throw new Error(`The proxy answered HTTP ${res.status} to /v1/models`);
+    const body = await res.json().catch(() => null);
+    proxyModelsOf(body?.data, models);
+    const last = typeof body?.last_id === "string" ? body.last_id : null;
+    if (body?.has_more !== true || !last || models.length >= MAX_PROXY_MODELS)
+      break;
+    after = last;
+  }
+  return models;
+}
+
+// src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var AGENT_MODELS_FILE = ".specdriven/agent-models.json";
@@ -46021,7 +46080,7 @@ async function listedClaudeModels(dataDir) {
   }
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/host.ts
+// src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
@@ -46082,7 +46141,7 @@ var plugin = {
       settings,
       token: () => storedToken(secrets),
       listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
-      accountModels: () => signedInAccountModels(),
+      accountModels: () => offeredModels(),
       saveSettings: async (patch) => {
         const parsed = claudeSettingsPatch(patch);
         if ("error" in parsed)
@@ -46118,6 +46177,16 @@ var plugin = {
       return accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : NO_ACCOUNT);
     };
     const signedInAccountModels = async () => (await signedInAccount()).models;
+    const offeredModels = async () => {
+      const own = await settings();
+      const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
+      if (auth.mode === "login")
+        return signedInAccountModels();
+      if (!auth.proxy)
+        return [];
+      const { url, token } = auth.proxy;
+      return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }))).models;
+    };
     const answer = async () => {
       const own = await settings();
       const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
@@ -46156,6 +46225,7 @@ var plugin = {
       if (!url)
         return json({ error: "Enter the proxy's url first" }, 400);
       const token = await storedToken(secrets) ?? auth.detected.token;
+      forgetAccountModels();
       return json({ url, ...await checkProxy(url, token) });
     };
     const postLogin = async (req) => {
@@ -46198,7 +46268,7 @@ var plugin = {
     };
     const getModels = async () => {
       try {
-        return json({ models: await signedInAccountModels() });
+        return json({ models: await offeredModels() });
       } catch (e) {
         return json({ models: [], error: e.message }, 502);
       }
@@ -46237,5 +46307,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=98569F1DD75A587F64756E2164756E21
+//# debugId=189FDE4C1FDC203864756E2164756E21
 //# sourceMappingURL=host.js.map

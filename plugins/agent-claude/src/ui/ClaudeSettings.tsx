@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AccountModel, AccountProbe } from "../accountModels";
+import { narrowModels } from "../modelMenu";
 import {
   CLAUDE_EFFORTS,
   CLAUDE_MODEL_ALIASES,
@@ -130,10 +131,18 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
   const [error, setError] = useState<string | null>(null);
   const [account, setAccount] = useState<AccountModel[] | null>(null);
 
-  // Signed in with a Claude account: the models it offers, asked afresh
-  // whenever the account changes, and again once a sign-in is done — the
-  // same account signing in again still gets a fresh list.
-  const accountKey = info?.mode === "login" && info.login.loggedIn ? (info.login.email ?? "") : null;
+  // The models the sign-in offers — a Claude account's, or the proxy's
+  // (GET /v1/models) — asked afresh whenever the account or the proxy
+  // changes, and again once a sign-in or a proxy check is done: the same
+  // account signing in again still gets a fresh list.
+  const accountKey =
+    info?.mode === "login"
+      ? info.login.loggedIn
+        ? (info.login.email ?? "")
+        : null
+      : info?.mode === "proxy" && info.proxy.url
+        ? `proxy ${info.proxy.url} ${info.proxy.hasToken}`
+        : null;
   const [modelsAsk, setModelsAsk] = useState(0);
   const reloadModels = () => setModelsAsk((n) => n + 1);
   useEffect(() => {
@@ -184,13 +193,14 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
       {info.mode === "login" ? (
         <ClaudeAccount info={info} onChange={setInfo} refresh={refresh} reloadModels={reloadModels} onModels={setAccount} />
       ) : (
-        <ClaudeProxy info={info} refresh={refresh} onError={setError} />
+        <ClaudeProxy info={info} refresh={refresh} onError={setError} reloadModels={reloadModels} />
       )}
       {info.mode === "proxy" && <ProxyTimeout info={info} refresh={refresh} onError={setError} />}
       <DefaultModel
         info={info}
         models={models}
         account={accountKey === null ? null : account}
+        offeredBy={info.mode === "proxy" ? "the proxy" : "your Claude account"}
         refresh={refresh}
         onError={setError}
       />
@@ -317,13 +327,19 @@ export function DefaultModel({
   info,
   models,
   account = null,
+  offeredBy = "your Claude account",
   refresh,
   onError,
 }: {
   info: ClaudeAuthInfo;
+  /** The names the data repo lists for Claude, which narrow the menu; null
+      from an app that keeps no lists. */
   models: string[] | null;
-  /** The signed-in account's models; null when not signed in or not known. */
+  /** The models the sign-in offers — the account's, or the proxy's; null
+      when not signed in or not known. */
   account?: AccountModel[] | null;
+  /** Who offers them, for the hint: "your Claude account" or "the proxy". */
+  offeredBy?: string;
   refresh: () => Promise<void>;
   onError: (error: string | null) => void;
 }) {
@@ -339,19 +355,25 @@ export function DefaultModel({
     await refresh();
   };
   if (account && account.length > 0) {
-    // What a new Claude starts on: the chosen one, else the first listed,
-    // else Claude Code's own — the account's first row.
-    const shown = draft || models?.[0] || account[0]!.value;
-    const options = account.some((m) => m.value === shown)
-      ? account
-      : [...account, { value: shown, displayName: shown, description: "" }];
+    // The menu: what the sign-in offers, narrowed to the names the data
+    // repo lists when it lists any. What a new Claude starts on: the
+    // chosen one, else the menu's first.
+    const menu: AccountModel[] = narrowModels(account, models ?? []).map((m) => ({ description: "", ...m }));
+    const shown = draft || menu[0]!.value;
+    // A default the menu lost stays on offer after it — the offered row
+    // when there is one, so it keeps its name.
+    const options = menu.some((m) => m.value === shown)
+      ? menu
+      : [...menu, account.find((m) => m.value === shown) ?? { value: shown, displayName: shown, description: "" }];
+    const narrowed = models !== null && models.length > 0;
     return (
       <label className="settings-row">
         <span className="settings-row-label">
           Default model
           <span className="settings-row-hint">
             The model the coding agent pane and the app's other Claude calls start on, from the
-            models your Claude account offers. Applies to sessions started after the change.
+            models {offeredBy} offers{narrowed ? ", narrowed to the ones Settings → AI agents lists for Claude" : ""}.
+            Applies to sessions started after the change.
           </span>
         </span>
         <select aria-label="Default Claude model" value={shown} onChange={(e) => void commit(e.target.value)}>
@@ -732,10 +754,13 @@ function ClaudeProxy({
   info,
   refresh,
   onError,
+  reloadModels,
 }: {
   info: ClaudeAuthInfo;
   refresh: () => Promise<void>;
   onError: (error: string | null) => void;
+  /** Have "Default model" ask the proxy for its models again. */
+  reloadModels?: () => void;
 }) {
   const { proxy } = info;
   const [urlDraft, setUrlDraft] = useState(proxy.storedUrl ?? "");
@@ -784,6 +809,8 @@ function ClaudeProxy({
     });
     setBusy(false);
     setCheck(result.ok ? `${result.data.result === "ok" ? "OK" : result.data.result === "unauthorized" ? "Wrong token" : result.data.result === "unreachable" ? "Unreachable" : "Odd answer"} — ${result.data.detail}` : result.error);
+    // A proxy that answers lists its models: the menu follows.
+    if (result.ok && result.data.result === "ok") reloadModels?.();
   };
 
   const detected = proxy.detected;

@@ -26,7 +26,8 @@ import {
 } from "./auth";
 import type { EffectiveClaudeAuth, LoginStatus } from "./auth";
 import { NO_ACCOUNT, accountModels, fetchAccountModels, forgetAccountModels } from "./accountModels";
-import type { AccountProbe } from "./accountModels";
+import type { AccountModel, AccountProbe } from "./accountModels";
+import { fetchProxyModels } from "./proxyModels";
 import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
 import { listedClaudeModels } from "./models";
@@ -115,7 +116,7 @@ const plugin: Plugin<Context, HostConfig> = {
           settings,
           token: () => storedToken(secrets),
           listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
-          accountModels: () => signedInAccountModels(),
+          accountModels: () => offeredModels(),
           // The pane's model and effort picks become Settings → Claude's defaults.
           saveSettings: async (patch) => {
             const parsed = claudeSettingsPatch(patch);
@@ -170,6 +171,18 @@ const plugin: Plugin<Context, HostConfig> = {
     };
     const signedInAccountModels = async () => (await signedInAccount()).models;
 
+    /** The models the sign-in offers, for every model menu: the account's
+        while Claude signs in with one, the proxy's GET /v1/models answer
+        behind a proxy — both kept a while, forgotten with the sign-in. */
+    const offeredModels = async (): Promise<AccountModel[]> => {
+      const own = await settings();
+      const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
+      if (auth.mode === "login") return signedInAccountModels();
+      if (!auth.proxy) return [];
+      const { url, token } = auth.proxy;
+      return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }))).models;
+    };
+
     const answer = async (): Promise<Response> => {
       const own = await settings();
       const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
@@ -216,6 +229,8 @@ const plugin: Plugin<Context, HostConfig> = {
         auth.detected.url;
       if (!url) return json({ error: "Enter the proxy's url first" }, 400);
       const token = (await storedToken(secrets)) ?? auth.detected.token;
+      // The proxy may list other models now: the next menu asks it again.
+      forgetAccountModels();
       return json({ url, ...(await checkProxy(url, token)) });
     };
 
@@ -271,11 +286,12 @@ const plugin: Plugin<Context, HostConfig> = {
       }
     };
 
-    // The models the Claude account offers, for Settings → Claude's
-    // "Default model"; none behind a proxy or with no one signed in.
+    // The models the sign-in offers, for Settings → Claude's "Default
+    // model": the Claude account's, or the proxy's; none with no one signed
+    // in, or a proxy that lists none.
     const getModels: Handler = async () => {
       try {
-        return json({ models: await signedInAccountModels() });
+        return json({ models: await offeredModels() });
       } catch (e) {
         return json({ models: [], error: (e as Error).message }, 502);
       }

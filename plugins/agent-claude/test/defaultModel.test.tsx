@@ -1,9 +1,11 @@
 // Settings → Claude's "Default model" (specs/agents/claude.feature.md "Choose
-// the model Claude starts on"): a dropdown of the models the app's Settings →
-// AI agents lists for Claude (specs/agents/agent-plugins.feature.md "Each
-// agent offers the models the data repo lists"), the first chosen until
-// another is, and the free field it was before in an app that keeps no lists;
-// signed in with a Claude account, every model the account offers.
+// the model Claude starts on"): a dropdown of the models the sign-in offers —
+// the Claude account's, or the proxy's GET /v1/models — narrowed to the names
+// the app's Settings → AI agents lists for Claude when it lists any
+// (specs/agents/agent-plugins.feature.md "Each agent offers the models the
+// data repo lists"), the first chosen until another is; with no such list and
+// nothing offered, the list alone, and the free field it was before in an app
+// that keeps no lists.
 
 import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -18,15 +20,17 @@ import {
   forgetAccountModels,
   type AccountModel,
 } from "../src/accountModels";
+import { narrowModels } from "../src/modelMenu";
 import { AGENT_MODELS_FILE, listedClaudeModels } from "../src/models";
+import { fetchProxyModels, proxyModelsOf } from "../src/proxyModels";
 import type { QueryLike } from "../src/provider";
 import { DEFAULT_SETTINGS } from "../src/settings";
 import { DefaultEffort, DefaultModel, accountModelLabel, claudeModelsOf, type ClaudeAuthInfo } from "../src/ui/ClaudeSettings";
 
 const info = (defaultModel: string | null) => ({ defaultModel }) as ClaudeAuthInfo;
-const html = (defaultModel: string | null, models: string[] | null, account: AccountModel[] | null = null) =>
+const html = (defaultModel: string | null, models: string[] | null, account: AccountModel[] | null = null, offeredBy?: string) =>
   renderToStaticMarkup(
-    <DefaultModel info={info(defaultModel)} models={models} account={account} refresh={async () => {}} onError={() => {}} />,
+    <DefaultModel info={info(defaultModel)} models={models} account={account} offeredBy={offeredBy} refresh={async () => {}} onError={() => {}} />,
   );
 
 const ACCOUNT: AccountModel[] = [
@@ -93,18 +97,83 @@ test("signed in with a Claude account, the default model is a dropdown of every 
       '<option value="claude-fable-5-1[1m]" title="Fable 5.1 · Most capable">Fable 5.1 — claude-fable-5-1[1m]</option>' +
       '<option value="haiku">Haiku — haiku</option>',
   );
-  // It shows the model a new Claude starts on: the chosen one, else the
-  // first the data repo lists — offered after the account's when it has
-  // none by that name, named after the row it resolves to.
-  expect(html("opus", ["haiku"], ACCOUNT)).toMatch(/<option value="opus"[^>]* selected="">Opus 4.8 — opus</);
-  expect(html(null, ["haiku"], ACCOUNT)).toContain('<option value="haiku" selected="">Haiku — haiku</option>');
+  // A default the menu does not hold stays on offer after it, named after
+  // the row it resolves to.
   expect(html("claude-opus-4-8", [], ACCOUNT)).toContain(
     '<option value="haiku">Haiku — haiku</option><option value="claude-opus-4-8" selected="">Opus 4.8 — claude-opus-4-8</option>',
   );
   expect(html("my-model", null, ACCOUNT)).toContain('<option value="my-model" selected="">my-model</option>');
-  // No account list (not signed in, or Claude Code could not say): as before.
+  // No account list (not signed in, or Claude Code could not say): the data repo's alone.
   expect(html(null, ["opus"], [])).toContain('<option value="opus" selected="">opus</option>');
   expect(accountModelLabel({ value: "x", displayName: "x", description: "" }, ACCOUNT)).toBe("x");
+});
+
+test("the names Settings → AI agents lists narrow the offered models, in the list's order, the first chosen until another is", () => {
+  // Each listed name is the offered row for it — by value, or by the id an
+  // alias resolves to — and a name offered under neither is kept bare.
+  expect(narrowModels(ACCOUNT, ["haiku", "claude-opus-4-8", "my-model"])).toEqual([
+    { value: "haiku", displayName: "Haiku", description: "" },
+    { value: "opus", resolvedModel: "claude-opus-4-8", displayName: "Opus", description: "Opus 4.8 · Best for everyday, complex tasks · $5/$25 per Mtok" },
+    { value: "my-model", displayName: "my-model", description: "" },
+  ]);
+  expect(narrowModels(ACCOUNT, [])).toEqual(ACCOUNT);
+  const narrowed = html(null, ["haiku", "opus"], ACCOUNT);
+  expect(narrowed).toContain("narrowed to the ones Settings → AI agents lists for Claude");
+  expect(narrowed).toContain(
+    '<option value="haiku" selected="">Haiku — haiku</option><option value="opus" title="Opus 4.8 · Best for everyday, complex tasks · $5/$25 per Mtok">Opus 4.8 — opus</option>',
+  );
+  expect(narrowed).not.toContain('value="default"');
+  expect(html("opus", ["haiku", "opus"], ACCOUNT)).toMatch(/<option value="opus"[^>]* selected="">Opus 4.8 — opus</);
+  // A default the narrowed menu lost stays chosen, on offer after it.
+  expect(html("default", ["haiku"], ACCOUNT)).toContain(
+    '<option value="haiku">Haiku — haiku</option><option value="default" title="Use the default model (currently Sonnet 4.6)" selected="">Use the default model (currently Sonnet 4.6) — default</option>',
+  );
+  // Behind a proxy the models are the proxy's, said so.
+  const proxied = html(null, null, [{ value: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", description: "Claude Sonnet 4.6" }], "the proxy");
+  expect(proxied).toContain("from the models the proxy offers.");
+  expect(proxied).toContain('<option value="claude-sonnet-4-6" title="Claude Sonnet 4.6" selected="">Claude Sonnet 4.6 — claude-sonnet-4-6</option>');
+});
+
+test("the proxy's GET /v1/models answer becomes the menu, page by page, with the token the way Claude Code sends it", async () => {
+  const seen: { path: string; query: string; auth: string | null; key: string | null; version: string | null }[] = [];
+  let status = 200;
+  const pages: Record<string, unknown> = {
+    "": { data: [{ id: "claude-opus-4-8", display_name: "Claude Opus 4.8" }, { id: "claude-opus-4-8", display_name: "Again" }, { id: "two words" }, { id: "claude-sonnet-4-6" }], has_more: true, last_id: "claude-sonnet-4-6" },
+    "claude-sonnet-4-6": { data: [{ id: "claude-haiku-4-5", display_name: " Claude Haiku 4.5 " }], has_more: false, last_id: "claude-haiku-4-5" },
+  };
+  const server = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      seen.push({ path: url.pathname, query: url.search, auth: req.headers.get("authorization"), key: req.headers.get("x-api-key"), version: req.headers.get("anthropic-version") });
+      if (status !== 200) return new Response("{}", { status });
+      return Response.json(pages[url.searchParams.get("after_id") ?? ""] ?? {});
+    },
+  });
+  try {
+    const base = `http://127.0.0.1:${server.port}/anthropic`;
+    expect(await fetchProxyModels(base, "tok")).toEqual([
+      { value: "claude-opus-4-8", displayName: "Claude Opus 4.8", description: "Claude Opus 4.8" },
+      { value: "claude-sonnet-4-6", displayName: "claude-sonnet-4-6", description: "" },
+      { value: "claude-haiku-4-5", displayName: "Claude Haiku 4.5", description: "Claude Haiku 4.5" },
+    ]);
+    expect(seen).toEqual([
+      { path: "/anthropic/v1/models", query: "?limit=100", auth: "Bearer tok", key: "tok", version: "2023-06-01" },
+      { path: "/anthropic/v1/models", query: "?limit=100&after_id=claude-sonnet-4-6", auth: "Bearer tok", key: "tok", version: "2023-06-01" },
+    ]);
+    // No token: none sent. An answer with no list is no models.
+    pages[""] = { object: "list" };
+    expect(await fetchProxyModels(`${base}/`, null)).toEqual([]);
+    expect(seen[2]).toMatchObject({ auth: null, key: null });
+    status = 401;
+    await expect(fetchProxyModels(base, "tok")).rejects.toThrow("The proxy refused the token (HTTP 401)");
+    status = 503;
+    await expect(fetchProxyModels(base, null)).rejects.toThrow("HTTP 503");
+  } finally {
+    server.stop(true);
+  }
+  await expect(fetchProxyModels(`http://127.0.0.1:${server.port}/`, "tok")).rejects.toThrow();
+  expect(proxyModelsOf("nope")).toEqual([]);
 });
 
 test("Claude Code's model rows become account models, dropping what is no model id and repeats", () => {
