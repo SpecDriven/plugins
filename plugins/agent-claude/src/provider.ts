@@ -35,6 +35,7 @@ import type {
 import { claudeLaunch, detectClaudeProxy } from "./auth";
 import { CLAUDE_BIN, claudeAvailable, claudeExecutable } from "./cli";
 import type { AccountModel } from "./accountModels";
+import { narrowModels } from "./modelMenu";
 import type {
   AgentChoices,
   AgentDefaultsPatch,
@@ -789,10 +790,12 @@ export interface ClaudeProviderOptions {
   settings?: () => Promise<ClaudeSettingsValues>;
   /** The proxy token the plugin's secret store holds; default: none. */
   token?: () => Promise<string | null>;
-  /** The models the data repo lists for Claude (src/models.ts); default: none. */
+  /** The names the data repo lists for Claude (src/models.ts), which narrow
+      the menus to those models; default: none, so nothing is narrowed. */
   listedModels?: () => Promise<string[]>;
-  /** The models the signed-in Claude account offers (src/accountModels.ts);
-      none behind a proxy or signed out. Default: none. */
+  /** The models the sign-in offers: the signed-in Claude account's
+      (src/accountModels.ts) or the proxy's (src/proxyModels.ts); none signed
+      out or with no proxy answer. Default: none. */
   accountModels?: () => Promise<AccountModel[]>;
   /** Write a patch to the plugin's settings section (HostConfig.settings);
       default: nothing is kept. */
@@ -899,25 +902,26 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
       void session.ready();
       return session;
     },
-    /** The pane's model and effort menus: the account's models while it
-        signs in with one, else the data repo's list for Claude, else Claude
-        Code's aliases; and what a new session starts on. */
+    /** The pane's model and effort menus: every model the sign-in offers —
+        the account's, or the proxy's — else Claude Code's aliases, narrowed
+        to the names the data repo lists for Claude when it lists any; and
+        what a new session starts on. */
     async choices(): Promise<AgentChoices> {
       const own = await settings();
-      const account = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => [] as AccountModel[]);
-      const listed = account.length > 0 ? [] : await listedModels();
-      const models: AgentModelOption[] =
-        account.length > 0
-          ? account.map((m) => ({
+      const offered = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => [] as AccountModel[]);
+      const all: AgentModelOption[] =
+        offered.length > 0
+          ? offered.map((m) => ({
               value: m.value,
               ...(m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}),
               displayName: m.displayName,
               ...(m.description ? { description: m.description } : {}),
               ...(m.efforts ? { efforts: m.efforts } : {}),
             }))
-          : listed.length > 0
-            ? listed.map((m) => ({ value: m, displayName: m }))
-            : ALIAS_MENU;
+          : ALIAS_MENU;
+      const models = narrowModels(all, await listedModels()).map((m) =>
+        "description" in m && m.description === "" ? { value: m.value, displayName: m.displayName } : m,
+      );
       return { models, model: await defaultModel(own), effort: own.defaultEffort };
     },
     /** A pick in the pane becomes Settings → Claude's default. */

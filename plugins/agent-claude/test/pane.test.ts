@@ -1157,7 +1157,7 @@ withBar("the pane switches a running Claude's model and effort, and the pick bec
   expect((await readState(root)).pluginSettings?.["agent-claude"]).toEqual({ adopted: true });
 });
 
-withBar("the pane's choices are the account's models, else the data repo's, else Claude Code's aliases", async () => {
+withBar("the pane's choices are the models the sign-in offers, else Claude Code's aliases, narrowed to the data repo's list", async () => {
   const listed = await (await api("/api/agent/agents/claude/choices")).json();
   expect(listed.choices).toEqual({
     models: [
@@ -1179,20 +1179,31 @@ withBar("the pane's choices are the account's models, else the data repo's, else
   expect(saved.status).toBe(200);
   expect((await saved.json()).choices).toMatchObject({ model: "opus", effort: "high" });
 
-  // Signed in with an account: its menu, effort levels and all.
-  const provider = createClaudeProvider({
-    accountModels: async () => [
-      { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", efforts: ["low", "high"] },
-      { value: "haiku", displayName: "Haiku", description: "", efforts: [] },
-    ],
-    listedModels: async () => ["never-shown"],
-  });
+  // Signed in with an account (or behind a proxy that lists them): its
+  // menu, effort levels and all.
+  const offered = async () => [
+    { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", efforts: ["low", "high"] as ("low" | "high")[] },
+    { value: "haiku", displayName: "Haiku", description: "", efforts: [] as [] },
+  ];
+  const provider = createClaudeProvider({ accountModels: offered });
   expect(await provider.choices!({ dataRepo: null })).toEqual({
     models: [
       { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", efforts: ["low", "high"] },
       { value: "haiku", displayName: "Haiku", efforts: [] },
     ],
-    model: "never-shown",
+    model: null,
+    effort: null,
+  });
+  // The data repo's list narrows it: its names, in its order, each the
+  // offered row (by value or the id an alias resolves to), a stranger bare.
+  const narrowed = createClaudeProvider({ accountModels: offered, listedModels: async () => ["haiku", "claude-opus-5-5", "my-model"] });
+  expect(await narrowed.choices!({ dataRepo: null })).toEqual({
+    models: [
+      { value: "haiku", displayName: "Haiku", efforts: [] },
+      { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", efforts: ["low", "high"] },
+      { value: "my-model", displayName: "my-model" },
+    ],
+    model: "haiku",
     effort: null,
   });
   // An account list that fails to come is no list.

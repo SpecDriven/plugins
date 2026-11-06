@@ -65,7 +65,19 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/settings.ts
+// src/modelMenu.ts
+function narrowModels(all, listed) {
+  if (listed.length === 0)
+    return [...all];
+  const out = [];
+  for (const name of listed) {
+    const row = all.find((m3) => m3.value === name) ?? all.find((m3) => m3.resolvedModel === name);
+    out.push(row ?? { value: name, displayName: name, description: "" });
+  }
+  return out;
+}
+
+// src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
@@ -79,7 +91,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/ui/ClaudeSettings.tsx
+// src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -129,7 +141,7 @@ function ClaudeSettings({ models = null } = {}) {
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState(null);
   const [account, setAccount] = useState(null);
-  const accountKey = info?.mode === "login" && info.login.loggedIn ? info.login.email ?? "" : null;
+  const accountKey = info?.mode === "login" ? info.login.loggedIn ? info.login.email ?? "" : null : info?.mode === "proxy" && info.proxy.url ? `proxy ${info.proxy.url} ${info.proxy.hasToken}` : null;
   const [modelsAsk, setModelsAsk] = useState(0);
   const reloadModels = () => setModelsAsk((n) => n + 1);
   useEffect(() => {
@@ -213,7 +225,8 @@ function ClaudeSettings({ models = null } = {}) {
       }) : /* @__PURE__ */ jsx(ClaudeProxy, {
         info,
         refresh,
-        onError: setError
+        onError: setError,
+        reloadModels
       }),
       info.mode === "proxy" && /* @__PURE__ */ jsx(ProxyTimeout, {
         info,
@@ -224,6 +237,7 @@ function ClaudeSettings({ models = null } = {}) {
         info,
         models,
         account: accountKey === null ? null : account,
+        offeredBy: info.mode === "proxy" ? "the proxy" : "your Claude account",
         refresh,
         onError: setError
       }),
@@ -340,6 +354,7 @@ function DefaultModel({
   info,
   models,
   account = null,
+  offeredBy = "your Claude account",
   refresh,
   onError
 }) {
@@ -357,8 +372,10 @@ function DefaultModel({
     await refresh();
   };
   if (account && account.length > 0) {
-    const shown = draft || models?.[0] || account[0].value;
-    const options = account.some((m4) => m4.value === shown) ? account : [...account, { value: shown, displayName: shown, description: "" }];
+    const menu = narrowModels(account, models ?? []).map((m4) => ({ description: "", ...m4 }));
+    const shown = draft || menu[0].value;
+    const options = menu.some((m4) => m4.value === shown) ? menu : [...menu, account.find((m4) => m4.value === shown) ?? { value: shown, displayName: shown, description: "" }];
+    const narrowed = models !== null && models.length > 0;
     return /* @__PURE__ */ jsxs("label", {
       className: "settings-row",
       children: [
@@ -366,9 +383,15 @@ function DefaultModel({
           className: "settings-row-label",
           children: [
             "Default model",
-            /* @__PURE__ */ jsx("span", {
+            /* @__PURE__ */ jsxs("span", {
               className: "settings-row-hint",
-              children: "The model the coding agent pane and the app's other Claude calls start on, from the models your Claude account offers. Applies to sessions started after the change."
+              children: [
+                "The model the coding agent pane and the app's other Claude calls start on, from the models ",
+                offeredBy,
+                " offers",
+                narrowed ? ", narrowed to the ones Settings → AI agents lists for Claude" : "",
+                ". Applies to sessions started after the change."
+              ]
             })
           ]
         }),
@@ -799,7 +822,8 @@ function downloadText(d) {
 function ClaudeProxy({
   info,
   refresh,
-  onError
+  onError,
+  reloadModels
 }) {
   const { proxy } = info;
   const [urlDraft, setUrlDraft] = useState(proxy.storedUrl ?? "");
@@ -852,6 +876,8 @@ function ClaudeProxy({
     });
     setBusy(false);
     setCheck(result.ok ? `${result.data.result === "ok" ? "OK" : result.data.result === "unauthorized" ? "Wrong token" : result.data.result === "unreachable" ? "Unreachable" : "Odd answer"} — ${result.data.detail}` : result.error);
+    if (result.ok && result.data.result === "ok")
+      reloadModels?.();
   };
   const detected = proxy.detected;
   const canUseDetected = detected.url !== null && (detected.url !== proxy.storedUrl || detected.hasToken && !proxy.storedToken);
@@ -976,7 +1002,7 @@ function ClaudeProxy({
   });
 }
 
-// ../../../../plugins-signin-finish/plugins/agent-claude/src/client.tsx
+// src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -1004,5 +1030,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=C19CDAE48ED6D72F64756E2164756E21
+//# debugId=9097DDE1A516775A64756E2164756E21
 //# sourceMappingURL=client.js.map

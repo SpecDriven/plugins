@@ -721,8 +721,36 @@ test("GET /api/claude/models lists the signed-in account's models, asked of Clau
   await settle(() => !loginState()!.inProgress);
   expect((await call("GET", "/api/claude/models")).body.models).toHaveLength(2);
   expect(asked).toHaveLength(2);
-  await call("PUT", "/api/claude/settings", { claudeAuth: "proxy", claudeProxyUrl: "http://localhost:6655" });
-  expect((await call("GET", "/api/claude/models")).body).toEqual({ models: [] });
+  // Behind a proxy the proxy is asked instead — once, with the token —
+  // and a proxy check has it asked again.
+  let listed_ = 0;
+  const proxy = Bun.serve({
+    port: 0,
+    fetch(req) {
+      listed_++;
+      if (req.headers.get("authorization") !== "Bearer app-token") return new Response("{}", { status: 401 });
+      return Response.json({ data: [{ id: "claude-sonnet-4-6", display_name: "Claude Sonnet 4.6" }], has_more: false });
+    },
+  });
+  try {
+    await call("PUT", "/api/claude/settings", { claudeAuth: "proxy", claudeProxyUrl: `http://127.0.0.1:${proxy.port}/` });
+    const refusedList = await call("GET", "/api/claude/models");
+    expect(refusedList.status).toBe(502);
+    expect(refusedList.body.error).toContain("HTTP 401");
+    await call("POST", "/api/claude/token", { token: "app-token" });
+    expect((await call("GET", "/api/claude/models")).body).toEqual({
+      models: [{ value: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", description: "Claude Sonnet 4.6" }],
+    });
+    await call("GET", "/api/claude/models");
+    expect(listed_).toBe(2);
+    await call("POST", "/api/claude/proxy/check", {});
+    await call("GET", "/api/claude/models");
+    expect(listed_).toBe(4);
+    // The pane's menu is the proxy's list too: pane.test.ts, under an app
+    // that has the bar (the floor app has no choices route).
+  } finally {
+    proxy.stop(true);
+  }
   expect(asked).toHaveLength(2);
 });
 
