@@ -28,3 +28,13 @@ export function narrowModels<T extends MenuRow>(all: readonly T[], listed: reado
   }
   return out;
 }
+
+/**
+ * Whether a model is one the data repo lists: a listed name, or the same
+ * model under its other name — an alias whose id is listed, or the id of a
+ * listed alias — as the full list pairs them. An empty list holds any model.
+ */
+export function inList(model: string, all: readonly MenuRow[], listed: readonly string[]): boolean {
+  if (listed.length === 0 || listed.includes(model)) return true;
+  return narrowModels(all, listed).some((m) => m.value === model || m.resolvedModel === model);
+}

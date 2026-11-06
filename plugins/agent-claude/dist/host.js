@@ -45242,6 +45242,11 @@ function narrowModels(all, listed) {
   }
   return out;
 }
+function inList(model, all, listed) {
+  if (listed.length === 0 || listed.includes(model))
+    return true;
+  return narrowModels(all, listed).some((m2) => m2.value === model || m2.resolvedModel === model);
+}
 
 // src/provider.ts
 var PROVIDER_LABEL = {
@@ -45783,7 +45788,18 @@ function createClaudeProvider(options = {}) {
   const settings = options.settings ?? (async () => DEFAULT_SETTINGS);
   const token = options.token ?? (async () => null);
   const listedModels = options.listedModels ?? (async () => []);
-  const defaultModel = async (own) => own.defaultModel ?? (await listedModels())[0] ?? null;
+  const defaultModel = async (own) => {
+    const listed = await listedModels();
+    const set2 = own.defaultModel;
+    if (set2 && (listed.length === 0 || listed.includes(set2)))
+      return set2;
+    if (set2) {
+      const offered = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => []);
+      if (inList(set2, offered, listed))
+        return set2;
+    }
+    return listed[0] ?? null;
+  };
   const firstResponseSeconds = async () => firstResponseReader ? firstResponseReader() : (await settings()).firstResponseSeconds;
   return {
     id: "claude",
@@ -46333,5 +46349,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=00F26B4B103F5A2F64756E2164756E21
+//# debugId=DC48194E598DD49C64756E2164756E21
 //# sourceMappingURL=host.js.map

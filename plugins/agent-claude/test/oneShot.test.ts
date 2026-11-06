@@ -90,3 +90,12 @@ test("no model asked for and none in Settings is the first the data repo lists f
   await set.provider.oneShot!(request);
   expect(set.started[0]!.model).toBe("opus");
 });
+
+test("a default in Settings the data repo's list does not hold gives way to the list's first", async () => {
+  const { provider, started } = answering("claude-haiku-4-5", ["claude-opus-4-8", "claude-sonnet-4-6"]);
+  await provider.oneShot!(request);
+  expect(started[0]!.model).toBe("claude-opus-4-8");
+  // A model asked for is the caller's to choose.
+  await provider.oneShot!({ ...request, model: "claude-haiku-4-5" });
+  expect(started[1]!.model).toBe("claude-haiku-4-5");
+});

@@ -1,6 +1,6 @@
 // The models the data repo allows for Claude (specs/agents/agent-plugins.feature.md
 // "Each agent offers the models the data repo lists", in the specs repo):
-// Settings → AI agents keeps one file per agent in the data repo's
+// Settings → Claude's "Claude models" list (the app's) keeps one file per agent in the data repo's
 // `.specdriven/` — Claude's is `claude-models.json`, a JSON list — which
 // narrows every model menu to the names it lists (src/modelMenu.ts). Before
 // the app split the lists,

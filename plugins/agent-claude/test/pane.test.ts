@@ -30,6 +30,7 @@ import {
 import type { AccountInfoLike, QueryLike } from "../src/provider";
 import { setClaudeAvailability } from "../src/cli";
 import { AGENT_MODELS_FILE } from "../src/models";
+import { DEFAULT_SETTINGS } from "../src/settings";
 import { mountPlugin, quietProfile } from "./app";
 
 /** The proxy token's store, as HostConfig.secrets("token") names it for this plugin. */
@@ -1084,20 +1085,25 @@ test("the first-response wait is a setting, 15 seconds unless changed", async ()
   expect(bad.status).toBe(400);
 });
 
-test("a new session starts on the default model Settings names, else the first listed, else Claude Code's own", async () => {
+test("a new session starts on the default model Settings names while the list holds it, else the first listed, else Claude Code's own", async () => {
   expect((await api("/api/agent/chat", "POST", { name: "plain" })).status).toBe(200);
   expect("model" in fakes.at(-1)!.options).toBe(false);
 
-  // Settings → AI agents lists Claude's models in the data repo: the first,
+  // Settings → Claude lists Claude's models in the data repo: the first,
   // the one Settings → Claude shows chosen.
   await mkdir(join(data, ".specdriven"), { recursive: true });
   await writeFile(join(data, AGENT_MODELS_FILE), JSON.stringify({ claude: ["claude-sonnet-4-6", "opus"] }));
   expect((await api("/api/agent/chat", "POST", { name: "listed" })).status).toBe(200);
   expect(fakes.at(-1)!.options.model).toBe("claude-sonnet-4-6");
 
+  await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "opus" } }, ...quietProfile(data) }, root);
+  expect((await api("/api/agent/chat", "POST", { name: "opus" })).status).toBe(200);
+  expect(fakes.at(-1)!.options.model).toBe("opus");
+
+  // A default the list does not hold is not used: the list's first is.
   await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "sonnet" } }, ...quietProfile(data) }, root);
   expect((await api("/api/agent/chat", "POST", { name: "sonnet" })).status).toBe(200);
-  expect(fakes.at(-1)!.options.model).toBe("sonnet");
+  expect(fakes.at(-1)!.options.model).toBe("claude-sonnet-4-6");
 });
 
 withChanged("a session carried on under a new sign-in keeps the model it ran on", async () => {
@@ -1206,6 +1212,20 @@ withBar("the pane's choices are the models the sign-in offers, else Claude Code'
     model: "haiku",
     effort: null,
   });
+  // A default in Settings the list does not hold gives way to the list's
+  // first; the same model under its other name (an alias of a listed id) is held.
+  const stale = createClaudeProvider({
+    accountModels: offered,
+    listedModels: async () => ["claude-opus-5-5", "haiku"],
+    settings: async () => ({ ...DEFAULT_SETTINGS, defaultModel: "sonnet" }),
+  });
+  expect((await stale.choices!({ dataRepo: null })).model).toBe("claude-opus-5-5");
+  const aliased = createClaudeProvider({
+    accountModels: offered,
+    listedModels: async () => ["claude-opus-5-5"],
+    settings: async () => ({ ...DEFAULT_SETTINGS, defaultModel: "default" }),
+  });
+  expect((await aliased.choices!({ dataRepo: null })).model).toBe("default");
   // An account list that fails to come is no list.
   const failing = createClaudeProvider({ accountModels: async () => Promise.reject(new Error("down")) });
   expect((await failing.choices!({ dataRepo: null })).models.map((m) => m.value)).toEqual(["opus", "sonnet", "haiku"]);
