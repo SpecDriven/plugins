@@ -50,7 +50,7 @@ test("the default model is a dropdown of only the models the app lists for Claud
     '<select aria-label="Default Claude model"><option value="opus" selected="">opus</option></select>',
   );
   const none = html(null, []);
-  expect(none).toContain("List some there to choose one here");
+  expect(none).toContain("List some below to choose one here");
   expect(none).toContain(
     '<select aria-label="Default Claude model" disabled=""><option value="" selected="">No models listed</option></select>',
   );
