@@ -527,13 +527,11 @@ function ClaudeAccount({
   onModels
 }) {
   const [email, setEmail] = useState(info.login.email ?? "");
-  const [code, setCode] = useState("");
   const [status, setStatus] = useState(null);
   const [check, setCheck] = useState(null);
   const [busy, setBusy] = useState(false);
   const signIn = info.signIn;
   const inProgress = signIn?.inProgress ?? false;
-  const opened = useRef(null);
   const signedIn = info.login.loggedIn && info.login.method !== "api_key";
   useEffect(() => {
     if (!inProgress)
@@ -546,10 +544,6 @@ function ClaudeAccount({
       const next = result.data.signIn;
       if (next?.inProgress) {
         onChange({ ...info, signIn: next, login: result.data.login });
-        if (next.url && opened.current !== next.url) {
-          opened.current = next.url;
-          window.open(next.url, "_blank", "noopener");
-        }
       } else {
         await refresh();
         if (next?.done)
@@ -570,20 +564,6 @@ function ClaudeAccount({
     setBusy(false);
     if (!result.ok)
       return setStatus(result.error);
-    onChange({ ...info, signIn: result.data.signIn });
-    if (result.data.signIn.url)
-      opened.current = result.data.signIn.url;
-    if (result.data.signIn.url)
-      window.open(result.data.signIn.url, "_blank", "noopener");
-  };
-  const sendCode = async () => {
-    setBusy(true);
-    setStatus(null);
-    const result = await call("POST", "/api/claude/login/code", { code: code.trim() });
-    setBusy(false);
-    if (!result.ok)
-      return setStatus(result.error);
-    setCode("");
     onChange({ ...info, signIn: result.data.signIn });
   };
   const cancel = async () => {
@@ -681,73 +661,10 @@ function ClaudeAccount({
         ]
       }) : inProgress ? /* @__PURE__ */ jsxs(Fragment2, {
         children: [
-          /* @__PURE__ */ jsxs("p", {
+          /* @__PURE__ */ jsx("p", {
             className: "hint",
-            children: [
-              "Finish signing in in your browser",
-              signIn?.url ? /* @__PURE__ */ jsxs(Fragment2, {
-                children: [
-                  " ",
-                  "—",
-                  " ",
-                  /* @__PURE__ */ jsx("a", {
-                    href: signIn.url,
-                    target: "_blank",
-                    rel: "noopener noreferrer",
-                    children: "open the sign-in page"
-                  }),
-                  " ",
-                  "if it did not open by itself"
-                ]
-              }) : null,
-              "."
-            ]
-          }),
-          signIn?.acceptsCode && /* @__PURE__ */ jsxs(Fragment2, {
-            children: [
-              /* @__PURE__ */ jsx("p", {
-                className: "hint",
-                children: "Signed in through that link? The page then shows a code — paste it here to finish."
-              }),
-              /* @__PURE__ */ jsxs("div", {
-                className: "auth-row",
-                children: [
-                  /* @__PURE__ */ jsx("input", {
-                    "aria-label": "Code from the sign-in page",
-                    value: code,
-                    disabled: signIn.codeSent,
-                    onChange: (e) => setCode(e.target.value),
-                    onKeyDown: (e) => {
-                      if (e.key === "Enter" && code.trim() && !signIn.codeSent)
-                        sendCode();
-                    },
-                    placeholder: "Code from the sign-in page",
-                    autoComplete: "one-time-code",
-                    spellCheck: false
-                  }),
-                  /* @__PURE__ */ jsx("button", {
-                    className: "secondary",
-                    disabled: busy || !code.trim() || signIn.codeSent,
-                    onClick: () => void sendCode(),
-                    children: signIn.codeSent ? "Finishing…" : "Finish sign-in"
-                  })
-                ]
-              }),
-              signIn.codeSent && /* @__PURE__ */ jsx("p", {
-                className: "hint",
-                role: "status",
-                children: "Code sent — waiting for Claude Code to finish the sign-in with it…"
-              }),
-              signIn.codeError && !signIn.codeSent && /* @__PURE__ */ jsxs("p", {
-                className: "error",
-                role: "alert",
-                children: [
-                  "Claude Code refused that code: ",
-                  signIn.codeError,
-                  " Finish the sign-in page first if it still waits on you, then paste the whole code it shows."
-                ]
-              })
-            ]
+            role: "status",
+            children: "Finish signing in in the browser window Claude Code opened — approve the sign-in there. This page updates by itself once Claude Code has the account; nothing is pasted here."
           }),
           /* @__PURE__ */ jsx("div", {
             className: "auth-row",
@@ -1035,5 +952,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=C132AE543D271E1D64756E2164756E21
+//# debugId=EF95C296A20399E664756E2164756E21
 //# sourceMappingURL=client.js.map
