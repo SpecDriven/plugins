@@ -679,8 +679,8 @@ const PNG_1X1 =
 
 // Apps from 0.1.230 carry pasted images to the agent; the floor and
 // release rows run an older app, whose engine has no images to hand over.
-const withImages = test.if("getChatImage" in engine);
-withImages("pasted images go to Codex as localImage items, read from the copies the app keeps", async () => {
+const appHandsImages = "getChatImage" in engine;
+test.if(appHandsImages)("pasted images go to Codex as localImage items, read from the copies the app keeps", async () => {
   const { id, codex } = await idleCodexSession();
   const sent = await api(`/api/agent/chat/${id}/message`, "POST", {
     text: "what is wrong here?",

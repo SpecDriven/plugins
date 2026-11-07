@@ -432,8 +432,8 @@ const pngBlock = { type: "image", source: { type: "base64", media_type: "image/p
 
 // Apps from 0.1.230 carry pasted images to the agent; the floor and
 // release rows run an older app, whose engine has no images to hand over.
-const withImages = test.if("getChatImage" in engine);
-withImages("pasted images go to Claude as image blocks before the text, and images alone carry no text block", async () => {
+const appHandsImages = "getChatImage" in engine;
+test.if(appHandsImages)("pasted images go to Claude as image blocks before the text, and images alone carry no text block", async () => {
   expect((agents.get("claude")!.capabilities as { images?: boolean }).images).toBe(true);
   const { id, fake } = await idleSession();
   const sent = await api(`/api/agent/chat/${id}/message`, "POST", {
@@ -873,9 +873,9 @@ test("a Claude Code that does not say leaves the session without an account", as
 
 const registry = agents as { changed?(id: string): void };
 const signInChanged = () => registry.changed!("claude");
-const withChanged = test.if(typeof registry.changed === "function");
+const appTellsSignInChanges = typeof registry.changed === "function";
 
-withChanged("a sign-in change restarts an idle Claude session under it, carrying the conversation on", async () => {
+test.if(appTellsSignInChanges)("a sign-in change restarts an idle Claude session under it, carrying the conversation on", async () => {
   fakeAccount = {};
   const { id, fake } = await idleSession();
   expect((await snapshot(id)).meta.account).toMatchObject({ billing: "none", label: "Not logged in" });
@@ -913,7 +913,7 @@ withChanged("a sign-in change restarts an idle Claude session under it, carrying
   expect(after.events.some((e) => e.kind === "note" && e.code === "ended")).toBe(false);
 });
 
-withChanged("a turn under way finishes before the session picks up a new sign-in", async () => {
+test.if(appTellsSignInChanges)("a turn under way finishes before the session picks up a new sign-in", async () => {
   const { id, fake } = await idleSession();
   await api(`/api/agent/chat/${id}/message`, "POST", { text: "hi" });
   await fake.input(1);
@@ -929,7 +929,7 @@ withChanged("a turn under way finishes before the session picks up a new sign-in
   expect((await snapshot(id)).meta.status).toBe("idle");
 });
 
-withChanged("a new sign-in that cannot start Claude leaves the session as it was, saying so", async () => {
+test.if(appTellsSignInChanges)("a new sign-in that cannot start Claude leaves the session as it was, saying so", async () => {
   const { id, fake } = await idleSession();
   setQueryFactory(() => {
     throw new Error("spawn claude ENOENT");
@@ -1110,7 +1110,7 @@ test("a new session starts on the default model Settings names while the list ho
   expect(fakes.at(-1)!.options.model).toBe("claude-sonnet-4-6");
 });
 
-withChanged("a session carried on under a new sign-in keeps the model it ran on", async () => {
+test.if(appTellsSignInChanges)("a session carried on under a new sign-in keeps the model it ran on", async () => {
   await writeState({ dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "opus" } }, ...quietProfile(data) }, root);
   const { fake } = await idleSession();
   expect(fake.options.model).toBe("opus");
@@ -1124,12 +1124,12 @@ withChanged("a session carried on under a new sign-in keeps the model it ran on"
 // The pane's composer bar (specs/agents/claude.feature.md "Pick Claude's
 // model and effort in the pane") needs an app that hands a session a model
 // and effort and switches them mid-session.
-const withBar = test.if("setChatModel" in engine);
+const appHasComposerBar = "setChatModel" in engine;
 
 /** A session's effort; ChatSessionMeta has it only from the app that has the bar. */
 const effortOf = (meta: ChatSessionMeta) => (meta as { effort?: string }).effort;
 
-withBar("a session starts on the model and effort the pane picked, over the defaults Settings names", async () => {
+test.if(appHasComposerBar)("a session starts on the model and effort the pane picked, over the defaults Settings names", async () => {
   await writeState(
     { dataRepo: data, pluginSettings: { "agent-claude": { adopted: true, defaultModel: "opus", defaultEffort: "low" } }, ...quietProfile(data) },
     root,
@@ -1150,7 +1150,7 @@ withBar("a session starts on the model and effort the pane picked, over the defa
   expect("effort" in fakes.at(-1)!.options).toBe(false);
 });
 
-withBar("the pane switches a running Claude's model and effort, and the pick becomes Settings → Claude's default", async () => {
+test.if(appHasComposerBar)("the pane switches a running Claude's model and effort, and the pick becomes Settings → Claude's default", async () => {
   const { id, fake } = await idleSession();
   expect((await api(`/api/agent/chat/${id}/model`, "PUT", { model: "haiku" })).status).toBe(200);
   expect((await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: "xhigh" })).status).toBe(200);
@@ -1167,7 +1167,7 @@ withBar("the pane switches a running Claude's model and effort, and the pick bec
   expect((await readState(root)).pluginSettings?.["agent-claude"]).toEqual({ adopted: true });
 });
 
-withBar("the pane's choices are the models the sign-in offers, else Claude Code's aliases, narrowed to the data repo's list", async () => {
+test.if(appHasComposerBar)("the pane's choices are the models the sign-in offers, else Claude Code's aliases, narrowed to the data repo's list", async () => {
   const listed = await (await api("/api/agent/agents/claude/choices")).json();
   expect(listed.choices).toEqual({
     models: [

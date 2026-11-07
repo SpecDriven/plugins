@@ -472,8 +472,8 @@ const PNG_1X1 =
 
 // Apps from 0.1.230 carry pasted images to the agent; the floor and
 // release rows run an older app, whose engine has no images to hand over.
-const withImages = test.if("getChatImage" in engine);
-withImages("pasted images go to pi with its prompt command, as its image items", async () => {
+const appHandsImages = "getChatImage" in engine;
+test.if(appHandsImages)("pasted images go to pi with its prompt command, as its image items", async () => {
   const { id, pi } = await idlePiSession();
   const sent = await api(`/api/agent/chat/${id}/message`, "POST", {
     text: "what is wrong here?",
