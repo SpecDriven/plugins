@@ -1277,9 +1277,10 @@ test("the sign-in Settings chose reaches Claude as a --settings override (src/au
 
 // Apps from 0.1.237 hand every session the Confluence MCP server (and export
 // the wiki tokens for it); the floor row runs an older app, which hands Claude
-// no MCP servers.
-const withMcp = test.if("exportConfluenceTokens" in confluenceTokens);
-withMcp("the MCP servers the app asks for reach the SDK as stdio servers, by name", async () => {
+// no MCP servers. (`test.if(…)(…)` inline, so a spec link to the line
+// resolves to this test's name.)
+const appHandsMcp = "exportConfluenceTokens" in confluenceTokens;
+test.if(appHandsMcp)("the MCP servers the app asks for reach the SDK as stdio servers, by name", async () => {
   // specs/external-links/confluence-wiki.feature.md "An agent session can
   // read the wiki": a saved wiki token makes the app hand every session the
   // Confluence server (src/server/agentMcp.ts); the plugin passes it on as

@@ -980,9 +980,10 @@ test("an unknown agent is refused, and Codex needs its CLI", async () => {
 
 // Apps from 0.1.237 hand every session the Confluence MCP server (and export
 // the wiki tokens for it); the floor row runs an older app, which hands Codex
-// no MCP servers.
-const withMcp = test.if("exportConfluenceTokens" in confluenceTokens);
-withMcp("the MCP servers the app asks for reach `codex app-server` as -c overrides, never the user's config", async () => {
+// no MCP servers. (`test.if(…)(…)` inline, so a spec link to the line
+// resolves to this test's name.)
+const appHandsMcp = "exportConfluenceTokens" in confluenceTokens;
+test.if(appHandsMcp)("the MCP servers the app asks for reach `codex app-server` as -c overrides, never the user's config", async () => {
   // specs/external-links/confluence-wiki.feature.md "An agent session can
   // read the wiki": a saved wiki token makes the app hand every session the
   // Confluence server (src/server/agentMcp.ts).
