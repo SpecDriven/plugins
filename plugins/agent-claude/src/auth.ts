@@ -416,9 +416,12 @@ export async function startLogin(email: string, deps: LoginDeps = {}): Promise<L
   (deps.fetchBinary ?? fetchBinary)().then(
     (fetched) => {
       log.info("Claude Code fetched for the sign-in", { claude: fetched, stillWanted: f.inProgress });
-      if (!f.inProgress) return;
       f.downloading = false;
       f.fetched = true;
+      // Claude Code is there now, whatever became of the sign-in: a
+      // cancelled one still has the app drop "not set up" (the sign-in's
+      // own end tells it otherwise).
+      if (!f.inProgress) return signInChanged();
       void launchLogin(f, fetched, deps);
     },
     (e: Error) => finish(f, e.message),
@@ -581,6 +584,22 @@ export async function logout(runner: Runner = run): Promise<void> {
 // ---------------------------------------------------------------------------
 // The proxy: is it there, and does it take the token?
 
+/** A token a request header can carry: printable ASCII, no spaces. One
+    with a space, a line break or a letter outside ASCII in it (a pasted
+    "Bearer sk-…", say) is refused by fetch, whose error quotes the header
+    — the token with it. */
+export const SENDABLE_TOKEN = /^[\x21-\x7e]+$/;
+
+export const UNSENDABLE_TOKEN =
+  "The proxy token has characters a request cannot carry — a space, a line break or a letter outside ASCII";
+
+/** A message with every copy of the token taken out, for words that go
+    back to the page (specs/agents/claude.feature.md S1: the token is
+    never sent back to it). */
+export function withoutToken(message: string, token: string | null): string {
+  return token ? message.split(token).join("[token]") : message;
+}
+
 export type ProxyCheck = "ok" | "unauthorized" | "unreachable" | "unexpected";
 
 /**
@@ -599,6 +618,7 @@ export async function checkProxy(
   } catch {
     return { result: "unreachable", detail: "Not a url" };
   }
+  if (token && !SENDABLE_TOKEN.test(token)) return { result: "unauthorized", detail: UNSENDABLE_TOKEN };
   const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
   if (token) {
     headers.authorization = `Bearer ${token}`;
@@ -612,7 +632,7 @@ export async function checkProxy(
     }
     return { result: "unexpected", detail: `Reachable, but it answered HTTP ${res.status}` };
   } catch (e) {
-    const message = (e as Error).name === "TimeoutError" ? "no answer in time" : (e as Error).message;
+    const message = (e as Error).name === "TimeoutError" ? "no answer in time" : withoutToken((e as Error).message, token);
     return { result: "unreachable", detail: `Could not reach ${target.origin}: ${message}` };
   }
 }

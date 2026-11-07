@@ -114,26 +114,32 @@ export async function fetchAccountModels(
   }
 }
 
-/** The last answer, and the one being asked for, shared by every caller. */
-let cached: { probe: AccountProbe; at: number } | null = null;
-let pending: Promise<AccountProbe> | null = null;
+/** The last answer, and the one being asked for, shared by every caller,
+    each with the sign-in it is for. */
+let cached: { key: string; probe: AccountProbe; at: number } | null = null;
+let pending: { key: string; asking: Promise<AccountProbe> } | null = null;
 
 /** The account and its models, asked of Claude Code at most once per
-    sign-in and TTL; a failed ask is not kept, so the next one tries again. */
-export async function accountModels(ask: () => Promise<AccountProbe>, now = Date.now()): Promise<AccountProbe> {
-  if (cached && now - cached.at < ACCOUNT_MODELS_TTL_MS) return cached.probe;
-  if (!pending) {
-    const asking = ask()
+    sign-in and TTL; a failed ask is not kept, so the next one tries again.
+    `key` names the sign-in the answer is for — the account, or a proxy
+    and its token: an answer kept or being asked for under another key is
+    not given, so a sign-in that changed without a forget (Claude Code's
+    own settings), or while an answer was on its way, gets its own. */
+export async function accountModels(ask: () => Promise<AccountProbe>, now = Date.now(), key = ""): Promise<AccountProbe> {
+  if (cached && cached.key === key && now - cached.at < ACCOUNT_MODELS_TTL_MS) return cached.probe;
+  if (pending?.key !== key) {
+    const mine: { key: string; asking: Promise<AccountProbe> } = { key, asking: Promise.resolve(NO_ACCOUNT) };
+    mine.asking = ask()
       .then((probe) => {
-        if (pending === asking) cached = { probe, at: Date.now() };
+        if (pending === mine) cached = { key, probe, at: Date.now() };
         return probe;
       })
       .finally(() => {
-        if (pending === asking) pending = null;
+        if (pending === mine) pending = null;
       });
-    pending = asking;
+    pending = mine;
   }
-  return pending;
+  return pending.asking;
 }
 
 /** Forget the answer: the sign-in changed, so the account may have. */
