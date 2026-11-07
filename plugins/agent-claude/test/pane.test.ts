@@ -18,12 +18,15 @@ import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
 import { pluginSection } from "@specdriven/app/src/plugins/host/pluginSettings";
 import { secretStore, setSecretBackend } from "@specdriven/app/src/server/secrets";
 import { readState, writeState } from "@specdriven/app/src/server/state";
+import { clearConfluenceToken, saveConfluenceToken } from "@specdriven/app/src/server/confluenceTokens";
+import * as confluenceTokens from "@specdriven/app/src/server/confluenceTokens";
 import {
   InputQueue,
   claudeBaseUrl,
   createClaudeProvider,
   describeAccount,
   mapSdkMessage,
+  mcpServerConfigs,
   setClaudeFirstResponseSeconds,
   setQueryFactory,
 } from "../src/provider";
@@ -1270,4 +1273,42 @@ test("the sign-in Settings chose reaches Claude as a --settings override (src/au
   const login = fakes.at(-1)!.options;
   expect(JSON.parse(login.extraArgs!.settings!)).toEqual(JSON.parse(ACCOUNT_SETTINGS));
   expect(login.env?.ANTHROPIC_BASE_URL).toBeUndefined();
+});
+
+// Apps from 0.1.237 hand every session the Confluence MCP server (and export
+// the wiki tokens for it); the floor row runs an older app, which hands Claude
+// no MCP servers. (`test.if(…)(…)` inline, so a spec link to the line
+// resolves to this test's name.)
+const appHandsMcp = "exportConfluenceTokens" in confluenceTokens;
+test.if(appHandsMcp)("the MCP servers the app asks for reach the SDK as stdio servers, by name", async () => {
+  // specs/external-links/confluence-wiki.feature.md "An agent session can
+  // read the wiki": a saved wiki token makes the app hand every session the
+  // Confluence server (src/server/agentMcp.ts); the plugin passes it on as
+  // the SDK takes a stdio server.
+  await saveConfluenceToken({ base: "https://wiki.acme.com", token: "pat-secret-7f3a", user: "me" });
+  try {
+    const res = await api("/api/agent/chat", "POST", { name: "wiki chat" });
+    expect(res.status).toBe(200);
+    const { options } = fakes.at(-1)!;
+    const servers = options.mcpServers as Record<string, { type?: string; command: string; args?: string[]; env?: Record<string, string> }>;
+    expect(Object.keys(servers)).toEqual(["specdriven-confluence"]);
+    const s = servers["specdriven-confluence"]!;
+    expect(s.type).toBe("stdio");
+    expect(s.command).toBe(process.execPath);
+    expect(s.args?.[0]).toEndWith(join("src", "mcp", "confluence.ts"));
+    expect(s.env).toEqual({ SPECDRIVEN_CONFLUENCE_TOKENS_FILE: join(process.env.SPECDRIVEN_HOME!, "confluence-tokens.json") });
+    expect(JSON.stringify(options)).not.toContain("pat-secret-7f3a");
+  } finally {
+    await clearConfluenceToken("https://wiki.acme.com");
+  }
+  // No token, no servers.
+  const res = await api("/api/agent/chat", "POST", { name: "plain chat" });
+  expect(res.status).toBe(200);
+  expect(fakes.at(-1)!.options.mcpServers).toBeUndefined();
+});
+
+test("mcpServerConfigs keys the SDK's stdio configs by server name", () => {
+  expect(mcpServerConfigs([{ name: "wiki", command: "/bin/x", args: ["a", "b"], env: { K: "v" } }])).toEqual({
+    wiki: { type: "stdio", command: "/bin/x", args: ["a", "b"], env: { K: "v" } },
+  });
 });

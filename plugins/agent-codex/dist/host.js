@@ -37,19 +37,19 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/cli.ts
+// src/cli.ts
 var CODEX_BIN = "codex";
 var probe = null;
 function codexAvailable() {
   return probe ? probe() : which(CODEX_BIN) !== null;
 }
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/oneShot.ts
+// src/oneShot.ts
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/codexChat.ts
+// src/codexChat.ts
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 var nodeSpawn = (o) => {
@@ -99,7 +99,7 @@ class CodexClient {
     const spawnFn = options.spawn ?? spawner ?? nodeSpawn;
     this.proc = spawnFn({
       bin: which(CODEX_BIN) ?? CODEX_BIN,
-      args: ["app-server"],
+      args: ["app-server", ...options.extraArgs ?? []],
       cwd: options.cwd,
       env: options.env ?? process.env,
       onStdout: readStdout,
@@ -560,7 +560,7 @@ function codexAnswers(questions, answers) {
   return { answers: out };
 }
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/oneShot.ts
+// src/oneShot.ts
 var KILL_GRACE_MS = 3000;
 var STDERR_TAIL = 5;
 function codexExecArgs(cwd, outFile, schemaFile, model) {
@@ -740,7 +740,31 @@ function runExec(req, args) {
   });
 }
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/provider.ts
+// src/mcpConfig.ts
+function tomlString(value) {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/[\u0000-\u001f\u007f]/g, (c) => {
+    const named = { "\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r" };
+    return named[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, "0").toUpperCase()}`;
+  });
+  return `"${escaped}"`;
+}
+function tomlKey(name) {
+  return name.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+function tomlServer(server) {
+  const env = Object.entries(server.env).map(([k, v]) => `${tomlKey(k)} = ${tomlString(v)}`);
+  const parts = [
+    `command = ${tomlString(server.command)}`,
+    `args = [${server.args.map(tomlString).join(", ")}]`,
+    ...env.length ? [`env = { ${env.join(", ")} }`] : []
+  ];
+  return `{ ${parts.join(", ")} }`;
+}
+function codexMcpArgs(servers) {
+  return servers.flatMap((s) => ["-c", `mcp_servers.${tomlKey(s.name)}=${tomlServer(s)}`]);
+}
+
+// src/provider.ts
 var CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
 var str = (value) => typeof value === "string" ? value : null;
 var rec = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -1043,6 +1067,7 @@ var codexProvider = {
     const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode);
     session.client = new CodexClient({
       cwd: opts.cwd,
+      ...opts.mcpServers?.length ? { extraArgs: codexMcpArgs(opts.mcpServers) } : {},
       onNotification: (method, params) => session.notification(method, params),
       onServerRequest: (id, method, params) => session.request(id, method, params),
       onStderr: session.stderr,
@@ -1055,7 +1080,7 @@ var codexProvider = {
   oneShot: codexOneShot
 };
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/host.ts
+// src/host.ts
 var plugin = {
   name: "agent-codex",
   inject: ["agents"],
@@ -1069,5 +1094,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=9BB0670AAA9A659F64756E2164756E21
+//# debugId=145DEB80EA9CF07464756E2164756E21
 //# sourceMappingURL=host.js.map

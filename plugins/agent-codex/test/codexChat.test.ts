@@ -16,6 +16,8 @@ import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "@specdriven/a
 import { createFeature, saveFeature } from "@specdriven/app/src/server/features";
 import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
 import { writeState } from "@specdriven/app/src/server/state";
+import { clearConfluenceToken, saveConfluenceToken } from "@specdriven/app/src/server/confluenceTokens";
+import * as confluenceTokens from "@specdriven/app/src/server/confluenceTokens";
 import {
   codexAnswers,
   codexPolicy,
@@ -28,6 +30,7 @@ import {
 } from "../src/codexChat";
 import type { CodexSpawnOptions } from "../src/codexChat";
 import { setCodexAvailability } from "../src/cli";
+import { codexMcpArgs, tomlString } from "../src/mcpConfig";
 import { mountPlugin, quietProfile } from "./app";
 
 let unmount: () => Promise<void> = async () => {};
@@ -973,4 +976,46 @@ test("an unknown agent is refused, and Codex needs its CLI", async () => {
   // The state says which agents this machine can run.
   const { agents } = (await (await api("/api/state")).json()) as { agents: { id: string; available: boolean }[] };
   expect(agents.find((a) => a.id === "codex")?.available).toBe(false);
+});
+
+// Apps from 0.1.237 hand every session the Confluence MCP server (and export
+// the wiki tokens for it); the floor row runs an older app, which hands Codex
+// no MCP servers. (`test.if(…)(…)` inline, so a spec link to the line
+// resolves to this test's name.)
+const appHandsMcp = "exportConfluenceTokens" in confluenceTokens;
+test.if(appHandsMcp)("the MCP servers the app asks for reach `codex app-server` as -c overrides, never the user's config", async () => {
+  // specs/external-links/confluence-wiki.feature.md "An agent session can
+  // read the wiki": a saved wiki token makes the app hand every session the
+  // Confluence server (src/server/agentMcp.ts).
+  await saveConfluenceToken({ base: "https://wiki.acme.com", token: "pat", user: "me" });
+  try {
+    const { codex } = await idleCodexSession();
+    expect(codex.options.args).toHaveLength(3);
+    expect(codex.options.args.slice(0, 2)).toEqual(["app-server", "-c"]);
+    const override = codex.options.args[2]!;
+    expect(override).toStartWith("mcp_servers.specdriven-confluence={ command = " + JSON.stringify(process.execPath) + ", args = [");
+    expect(override).toContain("/src/mcp/confluence.ts\"]");
+    expect(override).toContain('env = { SPECDRIVEN_CONFLUENCE_TOKENS_FILE = "' + join(process.env.SPECDRIVEN_HOME!, "confluence-tokens.json") + '" } }');
+    expect(override).not.toContain("pat");
+  } finally {
+    await clearConfluenceToken("https://wiki.acme.com");
+  }
+  const { codex } = await idleCodexSession();
+  expect(codex.options.args).toEqual(["app-server"]);
+});
+
+describe("TOML for Codex's -c", () => {
+  test("strings are quoted with their quotes, backslashes and control characters escaped", () => {
+    expect(tomlString("plain")).toBe('"plain"');
+    expect(tomlString('C:\\Program Files\\"x"')).toBe('"C:\\\\Program Files\\\\\\"x\\""');
+    expect(tomlString("a\nb\tc\u0001")).toBe('"a\\nb\\tc\\u0001"');
+  });
+
+  test("a server is one inline table under its name, and an odd name is made a bare key", () => {
+    expect(codexMcpArgs([{ name: "my wiki!", command: "/bin/x", args: ["a b", "c"], env: { K: "v", "X-Y": "w" } }])).toEqual([
+      "-c",
+      'mcp_servers.my_wiki_={ command = "/bin/x", args = ["a b", "c"], env = { K = "v", X-Y = "w" } }',
+    ]);
+    expect(codexMcpArgs([{ name: "w", command: "x", args: [], env: {} }])).toEqual(["-c", "mcp_servers.w={ command = \"x\", args = [] }"]);
+  });
 });
