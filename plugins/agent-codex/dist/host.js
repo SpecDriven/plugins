@@ -242,6 +242,14 @@ function text(value) {
 function number(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
+function codexContextUsage(params) {
+  const usage = record(params.tokenUsage);
+  const total = number(record(usage?.last)?.totalTokens);
+  if (total === null)
+    return null;
+  const window = number(usage?.modelContextWindow);
+  return { totalTokens: total, maxTokens: window !== null && window > 0 ? window : null, detail: "estimate" };
+}
 var CODEX_TOOL = {
   command: "Bash",
   fileChange: "Edit",
@@ -788,6 +796,8 @@ class CodexSession {
   stderrTail = [];
   threadId = null;
   mode;
+  model = null;
+  lastCount = null;
   constructor(host, name, cwd, mode) {
     this.host = host;
     this.name = name;
@@ -833,6 +843,7 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
     this.host.note("info", "init", `Codex${info.cliVersion ? ` ${info.cliVersion}` : ""} · ${info.model ?? "no model"} · ${this.cwd}`);
     this.host.note("info", "init", "Permission modes map onto Codex's approval policy and sandbox; a change applies from the next turn.");
     client.request("thread/name/set", { threadId: info.threadId, name: this.name });
+    this.model = info.model ?? null;
     this.host.ready({ agentSessionId: info.threadId, ...info.model ? { model: info.model } : {} });
     if (prompt || images?.length) {
       try {
@@ -882,6 +893,14 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
   notification(method, params) {
     if (this.final)
       return;
+    if (method === "thread/tokenUsage/updated") {
+      const usage = codexContextUsage(params);
+      if (!usage || usage.totalTokens === this.lastCount)
+        return;
+      this.lastCount = usage.totalTokens;
+      this.host.context?.({ ...usage, ...this.model ? { model: this.model } : {} });
+      return;
+    }
     if (method === "turn/started")
       this.host.turnStarted();
     if (method === "serverRequest/resolved") {
@@ -1056,7 +1075,8 @@ var codexProvider = {
     hasAccount: false,
     rememberPermissions: "session",
     oneShot: true,
-    images: true
+    images: true,
+    contextUsage: "totals"
   },
   defaultPermissionMode: "default",
   loginHint: {
@@ -1094,5 +1114,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=145DEB80EA9CF07464756E2164756E21
+//# debugId=BACD7FF9186736DB64756E2164756E21
 //# sourceMappingURL=host.js.map

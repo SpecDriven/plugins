@@ -42,10 +42,14 @@ import type {
   AgentDefaultsPatch,
   AgentMcpServer,
   AgentModelOption,
+  ChatContextUsage,
+  ContextDetail,
+  PaneHost,
   PaneProvider,
   PaneStartOptions,
   PastedImage,
 } from "./paneContract";
+import { contextUsageOf, contextWindowOf, tokensInWindow, type ContextUsageAnswer } from "./contextUsage";
 import { CLAUDE_MODEL_ALIASES, DEFAULT_SETTINGS, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 // --- The account chip -------------------------------------------------------
@@ -200,6 +204,8 @@ export interface QueryLike extends AsyncIterable<SDKMessage> {
   setModel?(model?: string): Promise<void>;
   /** Merge settings into the session's flag layer (the effort, here). */
   applyFlagSettings?(settings: { effortLevel?: ClaudeEffort | null }): Promise<void>;
+  /** Claude Code's /context count (src/contextUsage.ts); older binaries refuse it. */
+  getContextUsage?(opts?: { detail?: ContextDetail }): Promise<unknown>;
 }
 
 export type QueryFactory = (args: {
@@ -457,6 +463,15 @@ class ClaudeSession implements AgentSession {
   private firstResponse: ReturnType<typeof setTimeout> | null = null;
   /** Retries Claude Code reported in that turn before anything came back. */
   private apiRetries = 0;
+  /** Whether this Claude Code answers the context count: asked once, and
+      a refusal then means the totals from each turn stand in for it. */
+  private contextProbe: "unknown" | "yes" | "no" = "unknown";
+  /** The newest count asked for; an older answer arriving later is dropped. */
+  private contextTicket = 0;
+  /** What the last request put in the window, and the model's window, from
+      the turns themselves: the count an older Claude Code still gives. */
+  private lastWindowTokens: number | null = null;
+  private contextWindow: number | null = null;
 
   constructor(private readonly host: AgentHost) {}
 
@@ -532,6 +547,58 @@ class ClaudeSession implements AgentSession {
     this.disarmFirstResponse();
     this.input.close();
     this.abort.abort();
+  }
+
+  /**
+   * Count the context window now (specs/agents/claude.feature.md "Claude
+   * reports its context usage to the pane"): "summary" is Claude Code's
+   * cheap count from the last response, "full" counts every category with
+   * the API. Null when there is nothing to say yet. A Claude Code that
+   * refuses the request is not asked again; the turns' totals stand in.
+   */
+  async contextUsage(detail: ContextDetail): Promise<ChatContextUsage | null> {
+    const query = this.query;
+    if (query?.getContextUsage && this.contextProbe !== "no") {
+      try {
+        const answer = (await query.getContextUsage({ detail })) as ContextUsageAnswer;
+        this.contextProbe = "yes";
+        return contextUsageOf(answer, detail, new Date().toISOString());
+      } catch (e) {
+        // An answer that came before: a passing failure, not an old binary.
+        if (this.contextProbe === "yes") {
+          if (detail === "full") throw e;
+          return null;
+        }
+        this.contextProbe = "no";
+      }
+    }
+    return this.totalsFromTurns();
+  }
+
+  /** The count from the turns alone: what the last request carried, of the model's window. */
+  private totalsFromTurns(): ChatContextUsage | null {
+    if (this.lastWindowTokens === null) return null;
+    return {
+      at: new Date().toISOString(),
+      ...(this.model ? { model: this.model } : {}),
+      totalTokens: this.lastWindowTokens,
+      maxTokens: this.contextWindow,
+      detail: "estimate",
+    };
+  }
+
+  /** Count the window and show the count; never in the way of a turn. */
+  private countContext(): void {
+    const ticket = ++this.contextTicket;
+    const query = this.query;
+    void this.contextUsage("summary")
+      .then((usage) => {
+        if (!usage || this.final || ticket !== this.contextTicket || query !== this.query) return;
+        (this.host as PaneHost).context?.(usage);
+      })
+      .catch(() => {
+        // The last count stands.
+      });
   }
 
   /**
@@ -647,6 +714,8 @@ class ClaudeSession implements AgentSession {
       ...(account ? { account } : {}),
       ...(this.effort ? { effort: this.effort } : {}),
     });
+    // What fills the window before the first turn: the system prompt, the tools.
+    this.countContext();
     this.refreshIfWanted();
   }
 
@@ -707,10 +776,19 @@ class ClaudeSession implements AgentSession {
       this.host.update({ commands: this.commands });
       return;
     }
+    if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
+      const tokens = tokensInWindow(msg.message.usage);
+      if (tokens !== null && tokens > 0) this.lastWindowTokens = tokens;
+    }
     for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream)) this.host.emit(body);
     if (msg.type === "result") {
+      this.contextWindow = contextWindowOf(msg.modelUsage, this.model) ?? this.contextWindow;
       this.host.turnEnded();
+      // Counted once the composer is free again, not before.
+      this.countContext();
       this.refreshIfWanted();
+    } else if (msg.type === "system" && msg.subtype === "compact_boundary") {
+      this.countContext();
     }
   }
 
@@ -851,6 +929,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
       canChangeModelMidSession: true,
       effort: true,
       images: true,
+      contextUsage: "breakdown",
     },
     defaultPermissionMode: "auto",
     loginHint: {

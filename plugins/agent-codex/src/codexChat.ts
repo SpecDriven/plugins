@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { jsonlReader, which } from "@specdriven/host";
 import type { AgentOutput, AssistantBlock, PermissionMode } from "@specdriven/host";
+import type { ChatContextUsage } from "./paneContract";
 import { CODEX_BIN } from "./cli";
 
 // --- The subprocess ---------------------------------------------------------
@@ -330,6 +331,20 @@ function text(value: unknown): string | null {
 
 function number(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * How full the thread's context window is, from Codex's
+ * `thread/tokenUsage/updated`: the last request's tokens — what the window
+ * holds now — of the model's window. Null when the notification carries no
+ * count. Codex says how much, not what fills it.
+ */
+export function codexContextUsage(params: CodexParams): ChatContextUsage | null {
+  const usage = record(params.tokenUsage);
+  const total = number(record(usage?.last)?.totalTokens);
+  if (total === null) return null;
+  const window = number(usage?.modelContextWindow);
+  return { totalTokens: total, maxTokens: window !== null && window > 0 ? window : null, detail: "estimate" };
 }
 
 /** The names the pane knows Codex's tool items by — its icons and summaries
@@ -660,8 +675,9 @@ export function mapCodexNotification(
         : [];
     }
     default:
-      // thread/status, token usage, reasoning deltas, command output deltas,
-      // MCP startup, account and rate-limit chatter: nothing to show.
+      // thread/status, reasoning deltas, command output deltas, MCP
+      // startup, account and rate-limit chatter: nothing to show. Token
+      // usage goes to the context meter (codexContextUsage), not the log.
       return [];
   }
 }

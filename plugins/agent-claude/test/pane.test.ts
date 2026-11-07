@@ -18,6 +18,7 @@ import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
 import { pluginSection } from "@specdriven/app/src/plugins/host/pluginSettings";
 import { secretStore, setSecretBackend } from "@specdriven/app/src/server/secrets";
 import { readState, writeState } from "@specdriven/app/src/server/state";
+import { categoryId, contextUsageOf, contextWindowOf, tokensInWindow } from "../src/contextUsage";
 import { clearConfluenceToken, saveConfluenceToken } from "@specdriven/app/src/server/confluenceTokens";
 import * as confluenceTokens from "@specdriven/app/src/server/confluenceTokens";
 import {
@@ -101,7 +102,18 @@ class FakeQuery implements QueryLike {
   async accountInfo() {
     return fakeAccount;
   }
+  /** The details the plugin asked the context count for. */
+  contextAsks: string[] = [];
+  async getContextUsage(opts?: { detail?: string }) {
+    this.contextAsks.push(opts?.detail ?? "full");
+    // No answer set: an older Claude Code, which refuses the request.
+    if (!fakeContext) throw new Error("Unsupported control request: get_context_usage");
+    return fakeContext(opts?.detail ?? "full");
+  }
 }
+
+/** What the next FakeQuery answers the context count with; undefined refuses it. */
+let fakeContext: ((detail: string) => Promise<unknown>) | undefined;
 
 /** What the next FakeQuery says of the login; undefined, as an older
     Claude Code would. */
@@ -128,6 +140,7 @@ beforeEach(async () => {
   data = join(root, "data");
   fakes = [];
   fakeAccount = undefined;
+  fakeContext = undefined;
   setClaudeAvailability(() => true);
   setQueryFactory(({ prompt, options }) => {
     const fake = new FakeQuery(prompt, options);
@@ -1311,4 +1324,148 @@ test("mcpServerConfigs keys the SDK's stdio configs by server name", () => {
   expect(mcpServerConfigs([{ name: "wiki", command: "/bin/x", args: ["a", "b"], env: { K: "v" } }])).toEqual({
     wiki: { type: "stdio", command: "/bin/x", args: ["a", "b"], env: { K: "v" } },
   });
+});
+
+// --- The session popover's context meter -------------------------------------
+// (specs/agents/claude.feature.md "Claude reports its context usage to the
+// pane"): an app with the meter lends the host a `context` and offers Refresh.
+/** A session's context count; ChatSessionMeta has it only from the app that has the meter. */
+type Count = { totalTokens: number; maxTokens: number | null; detail: string; model?: string; slices?: unknown[] };
+const contextOf = (meta: ChatSessionMeta) => (meta as { context?: Count }).context;
+
+/** Claude Code 2.1.318's answer for a fresh session, trimmed (recorded 2026-11-07). */
+const ANSWER = {
+  categories: [
+    { id: "system_prompt", name: "System prompt", tokens: 241, color: "promptBorder", kind: "used" },
+    { id: "system_tools", name: "System tools", tokens: 6_397, color: "inactive", kind: "used" },
+    { name: "MCP tools", tokens: 1_900, color: "cyan" },
+    { name: "MCP tools (deferred)", tokens: 800, color: "cyan", isDeferred: true },
+    { name: "Memory files", tokens: 1_200, color: "orange" },
+    { id: "skills", name: "Skills", tokens: 1_995, color: "warning", kind: "used" },
+    { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33_000, color: "inactive", kind: "buffer" },
+    { id: "free_space", name: "Free space", tokens: 155_267, color: "promptBorder", kind: "free" },
+  ],
+  totalTokens: 11_733,
+  maxTokens: 200_000,
+  rawMaxTokens: 200_000,
+  percentage: 6,
+  model: "claude-sonnet-4-6",
+  memoryFiles: [{ path: "/work/CLAUDE.md", type: "Project", tokens: 1_200 }],
+  mcpTools: [
+    { name: "mcp__wiki__search", serverName: "wiki", tokens: 1_100, isLoaded: true },
+    { name: "mcp__wiki__get_page", serverName: "wiki", tokens: 800 },
+    { name: "mcp__jira__create", serverName: "jira", tokens: 800, isLoaded: false },
+  ],
+  systemTools: [{ name: "Bash", tokens: 3_000 }],
+  agents: [],
+  skills: { totalSkills: 1, includedSkills: 1, tokens: 1_995, skillFrontmatter: [{ name: "wordwrap", source: "userSettings", tokens: 3 }] },
+  autoCompactThreshold: 167_000,
+  isAutoCompactEnabled: true,
+  apiUsage: null,
+  gridRows: [],
+};
+
+test("Claude Code's context count becomes the pane's slices, with what each is made of", () => {
+  const usage = contextUsageOf(ANSWER, "summary", "2026-11-07T10:00:00.000Z");
+  expect(usage).toMatchObject({ model: "claude-sonnet-4-6", totalTokens: 11_733, maxTokens: 200_000, autoCompactAt: 167_000, detail: "estimate" });
+  expect(usage.slices!.map((s) => [s.id, s.kind])).toEqual([
+    ["system_prompt", "used"],
+    ["system_tools", "used"],
+    ["mcp_tools", "used"],
+    ["mcp_tools_deferred", "deferred"],
+    ["memory_files", "used"],
+    ["skills", "used"],
+    ["autocompact_buffer", "buffer"],
+    ["free_space", "free"],
+  ]);
+  const by = (id: string) => usage.slices!.find((s) => s.id === id)!;
+  expect(by("mcp_tools").items).toEqual([
+    { name: "mcp__wiki__search", detail: "wiki", tokens: 1_100 },
+    { name: "mcp__wiki__get_page", detail: "wiki", tokens: 800 },
+  ]);
+  expect(by("mcp_tools_deferred").items).toEqual([{ name: "mcp__jira__create", detail: "jira", tokens: 800 }]);
+  expect(by("memory_files").items).toEqual([{ name: "work/CLAUDE.md", detail: "Project", tokens: 1_200 }]);
+  expect(by("skills").items).toEqual([{ name: "wordwrap", detail: "userSettings", tokens: 3 }]);
+  expect(by("system_tools").items).toEqual([{ name: "Bash", tokens: 3_000 }]);
+  expect(by("free_space").items).toBeUndefined();
+  // Measured on request; no autocompact, no reserve point.
+  expect(contextUsageOf({ ...ANSWER, isAutoCompactEnabled: false }, "full", "x")).not.toHaveProperty("autoCompactAt");
+  expect(contextUsageOf(ANSWER, "full", "x").detail).toBe("measured");
+  expect(categoryId({ name: "Custom agents" })).toBe("custom_agents");
+  // The totals an older Claude Code still gives.
+  expect(tokensInWindow({ input_tokens: 10, cache_read_input_tokens: 2_000, cache_creation_input_tokens: 300, output_tokens: 40 })).toBe(2_350);
+  expect(tokensInWindow({})).toBeNull();
+  expect(contextWindowOf({ "claude-opus-5": { contextWindow: 1_000_000 }, "claude-haiku-4-5": { contextWindow: 200_000 } }, "claude-opus-5")).toBe(1_000_000);
+  expect(contextWindowOf({ "claude-haiku-4-5": { contextWindow: 200_000 } }, "opus")).toBe(200_000);
+  expect(contextWindowOf({}, null)).toBeNull();
+});
+
+test.if("refreshChatContext" in engine)("Claude counts its context once ready and after every turn, and Refresh measures it", async () => {
+  fakeContext = async () => ANSWER;
+  const { id, fake } = await idleSession();
+  // Counted once the session is ready: the cheap count.
+  const first = await until(() => snapshot(id), (s) => contextOf(s.meta) !== undefined);
+  expect(contextOf(first.meta)).toMatchObject({ totalTokens: 11_733, maxTokens: 200_000, detail: "estimate" });
+  expect(fake.contextAsks).toEqual(["summary"]);
+
+  // After a turn, once the composer is free again.
+  fakeContext = async () => ({ ...ANSWER, totalTokens: 40_000 });
+  expect((await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" })).status).toBe(200);
+  fake.emit(assistant("m1", [{ type: "text", text: "Hi." }]));
+  fake.emit(result());
+  const after = await until(() => snapshot(id), (s) => contextOf(s.meta)?.totalTokens === 40_000);
+  // Plain strings: an app without the meter has no "context" event kind.
+  const kinds: string[] = after.events.map((e) => e.kind);
+  expect(kinds.lastIndexOf("context")).toBeGreaterThan(kinds.lastIndexOf("result"));
+  expect(kinds.filter((k) => k === "context")).toHaveLength(1);
+  expect(fake.contextAsks).toEqual(["summary", "summary"]);
+
+  // A compaction changes the count: Claude says so, and it is counted again.
+  fakeContext = async () => ({ ...ANSWER, totalTokens: 15_000 });
+  fake.emit(sdk({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 40_000 }, uuid: "u-c", session_id: "claude-1" }));
+  await until(() => snapshot(id), (s) => contextOf(s.meta)?.totalTokens === 15_000);
+
+  // Refresh: every category counted.
+  const refreshed = await api(`/api/agent/chat/${id}/context`, "POST", { detail: "full" });
+  expect(refreshed.status).toBe(200);
+  expect(((await refreshed.json()) as { context: { detail: string } }).context.detail).toBe("measured");
+  expect(fake.contextAsks.at(-1)).toBe("full");
+  // A count that fails after one that worked keeps the last, and says so on Refresh.
+  fakeContext = async () => {
+    throw new Error("control request timed out");
+  };
+  const failed = await api(`/api/agent/chat/${id}/context`, "POST", { detail: "full" });
+  expect(failed.status).toBe(502);
+  expect(contextOf((await snapshot(id)).meta)?.detail).toBe("measured");
+});
+
+test.if("refreshChatContext" in engine)("a Claude Code that cannot count its context is asked once, then each turn's totals stand in", async () => {
+  const { id, fake } = await idleSession();
+  await until(async () => fake.contextAsks.length, (n) => n === 1);
+  // Nothing to say before a request has been made.
+  expect(contextOf((await snapshot(id)).meta)).toBeUndefined();
+
+  expect((await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" })).status).toBe(200);
+  fake.emit(
+    sdk({
+      type: "assistant",
+      message: {
+        id: "m1",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-5",
+        content: [{ type: "text", text: "Hi." }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 12, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 20_000, output_tokens: 488 },
+      },
+      parent_tool_use_id: null,
+      uuid: "u-a",
+      session_id: "claude-1",
+    }),
+  );
+  fake.emit(result({ modelUsage: { "claude-opus-5": { contextWindow: 200_000 } } }));
+  const s = await until(() => snapshot(id), (v) => contextOf(v.meta) !== undefined);
+  expect(contextOf(s.meta)).toMatchObject({ model: "claude-opus-5", totalTokens: 21_500, maxTokens: 200_000, detail: "estimate" });
+  expect(contextOf(s.meta)).not.toHaveProperty("slices");
+  expect(fake.contextAsks).toHaveLength(1);
 });

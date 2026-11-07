@@ -4,7 +4,7 @@
 // @specdriven/host so the plugin still type-checks against the older apps
 // it runs in — they lack these types and simply never call these methods.
 
-import type { AgentProvider, AgentStartOptions } from "@specdriven/host";
+import type { AgentHost, AgentProvider, AgentStartOptions } from "@specdriven/host";
 import type { ClaudeEffort } from "./settings";
 
 export interface AgentModelOption {
@@ -55,6 +55,7 @@ export type PaneCapabilities = AgentProvider["capabilities"] & {
   canChangeModelMidSession?: boolean;
   effort?: boolean;
   images?: boolean;
+  contextUsage?: "breakdown" | "totals";
 };
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
@@ -63,3 +64,39 @@ export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
   choices(ctx: { dataRepo: string | null }): Promise<AgentChoices>;
   setDefaults(patch: AgentDefaultsPatch): Promise<void>;
 };
+
+// --- The session popover's context meter (SpecDriven 0.1.243 and later) ----
+//
+// The pane shows how full a session's context window is: the plugin counts
+// it and hands the count to `host.context`, and answers the popover's
+// Refresh through `AgentSession.contextUsage`. An older app's host has no
+// `context`, so the plugin calls it as optional.
+
+export interface ContextItem {
+  name: string;
+  detail?: string;
+  tokens: number;
+}
+
+export interface ContextSlice {
+  id: string;
+  label: string;
+  tokens: number;
+  kind: "used" | "buffer" | "free" | "deferred";
+  items?: ContextItem[];
+}
+
+export interface ChatContextUsage {
+  at: string;
+  model?: string;
+  totalTokens: number;
+  maxTokens: number | null;
+  autoCompactAt?: number;
+  slices?: ContextSlice[];
+  detail: "estimate" | "measured";
+}
+
+export type ContextDetail = "summary" | "full";
+
+/** The host as an app with the context meter lends it. */
+export type PaneHost = AgentHost & { context?(usage: Omit<ChatContextUsage, "at"> & { at?: string }): void };

@@ -4,7 +4,7 @@
 // still type-checks against the older apps it runs in — they lack these
 // types and simply never pass them.
 
-import type { AgentProvider, AgentStartOptions } from "@specdriven/host";
+import type { AgentHost, AgentProvider, AgentStartOptions } from "@specdriven/host";
 
 /** An image pasted into the pane's message: its bytes, base64, and the
     copy the app keeps on disk. */
@@ -27,6 +27,19 @@ export interface AgentMcpServer {
 export type PaneStartOptions = AgentStartOptions & { images?: PastedImage[]; mcpServers?: AgentMcpServer[] };
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
-  capabilities: AgentProvider["capabilities"] & { images?: boolean };
+  capabilities: AgentProvider["capabilities"] & { images?: boolean; contextUsage?: "breakdown" | "totals" };
   start(opts: PaneStartOptions): ReturnType<AgentProvider["start"]>;
 };
+
+/** How full a session's context window is, for the pane's session popover
+    (SpecDriven 0.1.243 and later): Codex says the count and the window's
+    size, not what fills it. An older app's host has no `context`. */
+export interface ChatContextUsage {
+  at?: string;
+  model?: string;
+  totalTokens: number;
+  maxTokens: number | null;
+  detail: "estimate" | "measured";
+}
+
+export type PaneHost = AgentHost & { context?(usage: ChatContextUsage): void };

@@ -25,6 +25,7 @@ import {
   CODEX_TOOL,
   CodexClient,
   codexAnswers,
+  codexContextUsage,
   codexPolicy,
   codexQuestions,
   codexSandboxPolicy,
@@ -36,7 +37,7 @@ import {
 } from "./codexChat";
 import type { CodexParams, CodexStreamContext, RpcId } from "./codexChat";
 import { codexMcpArgs } from "./mcpConfig";
-import type { PaneProvider, PaneStartOptions, PastedImage } from "./paneContract";
+import type { PaneHost, PaneProvider, PaneStartOptions, PastedImage } from "./paneContract";
 
 /** The refusal when no `codex` is on PATH. */
 export const CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
@@ -78,6 +79,9 @@ class CodexSession implements AgentSession {
   private threadId: string | null = null;
   /** The mode the next turn carries; the core keeps the session's. */
   private mode: PermissionMode;
+  /** The model the thread runs on, and the last context count shown. */
+  private model: string | null = null;
+  private lastCount: number | null = null;
 
   constructor(
     private readonly host: AgentHost,
@@ -139,6 +143,7 @@ class CodexSession implements AgentSession {
     );
     // Named after the session, so `codex resume` lists it by that name.
     void client.request("thread/name/set", { threadId: info.threadId, name: this.name });
+    this.model = info.model ?? null;
     this.host.ready({ agentSessionId: info.threadId, ...(info.model ? { model: info.model } : {}) });
     if (prompt || images?.length) {
       try {
@@ -192,6 +197,14 @@ class CodexSession implements AgentSession {
 
   notification(method: string, params: CodexParams): void {
     if (this.final) return;
+    if (method === "thread/tokenUsage/updated") {
+      // The pane's context meter (specs/agents/agent-pane.feature.md S10).
+      const usage = codexContextUsage(params);
+      if (!usage || usage.totalTokens === this.lastCount) return;
+      this.lastCount = usage.totalTokens;
+      (this.host as PaneHost).context?.({ ...usage, ...(this.model ? { model: this.model } : {}) });
+      return;
+    }
     if (method === "turn/started") this.host.turnStarted();
     if (method === "serverRequest/resolved") {
       // Codex withdrew a question of its own (an interrupt, a dying turn):
@@ -386,6 +399,7 @@ export const codexProvider: PaneProvider = {
     rememberPermissions: "session",
     oneShot: true,
     images: true,
+    contextUsage: "totals",
   },
   defaultPermissionMode: "default",
   loginHint: {
