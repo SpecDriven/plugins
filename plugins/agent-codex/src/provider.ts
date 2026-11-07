@@ -35,6 +35,7 @@ import {
   newCodexStream,
 } from "./codexChat";
 import type { CodexParams, CodexStreamContext, RpcId } from "./codexChat";
+import { codexMcpArgs } from "./mcpConfig";
 import type { PaneProvider, PaneStartOptions, PastedImage } from "./paneContract";
 
 /** The refusal when no `codex` is on PATH. */
@@ -395,6 +396,9 @@ export const codexProvider: PaneProvider = {
     const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode);
     session.client = new CodexClient({
       cwd: opts.cwd,
+      // The MCP servers the app asks for (AgentStartOptions.mcpServers):
+      // the Confluence server while a wiki token is saved.
+      ...(opts.mcpServers?.length ? { extraArgs: codexMcpArgs(opts.mcpServers) } : {}),
       onNotification: (method, params) => session.notification(method, params),
       onServerRequest: (id, method, params) => session.request(id, method, params),
       onStderr: session.stderr,
