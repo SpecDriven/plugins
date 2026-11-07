@@ -13,6 +13,7 @@ import { AgentError, HOSTED_REFUSAL, getLogger, isDemoMode, isHostedMode, json }
 import type { Context, Handler, HostConfig, Plugin, SecretStore } from "@specdriven/host";
 import {
   ClaudeAuthError,
+  SENDABLE_TOKEN,
   cancelLogin,
   checkProxy,
   detectClaudeProxy,
@@ -169,7 +170,7 @@ const plugin: Plugin<Context, HostConfig> = {
       const cwd = await claudeCwd();
       const token = await storedToken(secrets);
       if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login") return NO_ACCOUNT;
-      return accountModels(async () => ((await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : NO_ACCOUNT));
+      return accountModels(async () => ((await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : NO_ACCOUNT), Date.now(), "login");
     };
     const signedInAccountModels = async () => (await signedInAccount()).models;
 
@@ -182,7 +183,11 @@ const plugin: Plugin<Context, HostConfig> = {
       if (auth.mode === "login") return signedInAccountModels();
       if (!auth.proxy) return [];
       const { url, token } = auth.proxy;
-      return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }))).models;
+      // Kept for this proxy and token only: an answer asked for under another
+      // sign-in — one Claude Code's own settings changed underneath, or one
+      // switched away from while it was being asked for — is never offered.
+      const key = `proxy\n${url}\n${token ?? ""}`;
+      return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }), Date.now(), key)).models;
     };
 
     const answer = async (): Promise<Response> => {
@@ -197,6 +202,9 @@ const plugin: Plugin<Context, HostConfig> = {
       const body = (await req.json().catch(() => ({}))) as { token?: unknown };
       if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
         return json({ error: "Paste the proxy's token" }, 400);
+      }
+      if (!SENDABLE_TOKEN.test(body.token.trim())) {
+        return json({ error: "A token is letters, digits and punctuation, with no spaces or line breaks" }, 400);
       }
       await secrets.save({ token: body.token.trim() });
       signInChanged();
@@ -277,9 +285,11 @@ const plugin: Plugin<Context, HostConfig> = {
     // it runs as (null when it was not started or did not say), "none"
     // when it found no account, token or key whatever the CLI said.
     const postLoginCheck: Handler = async () => {
+      // Whatever it finds, the menus show what it found from then on — a
+      // sign-out in a terminal, say, leaves none of the old models.
+      forgetAccountModels();
       const login = await loginStatus();
       if (!login.loggedIn || login.method === "api_key") return json({ login, models: [], error: null, account: null });
-      forgetAccountModels();
       try {
         const { account, models } = await signedInAccount();
         return json({ login, models, error: null, account });

@@ -82,12 +82,18 @@ export function normalizeClaudeProxyUrl(value: unknown): string | null {
   }
 }
 
+/** A wait of `n` >= 0 seconds in whole seconds: rounded down, except that
+    a fraction of a second is one — never 0, which is "no limit". */
+export function wholeSeconds(n: number): number {
+  return n > 0 && n < 1 ? 1 : Math.floor(n);
+}
+
 /** Effective first-response wait for a stored value: whole seconds, 0 for
     "no limit"; anything absent or unusable is the default. */
 export function normalizeAgentFirstResponseSeconds(value: unknown): number {
   const n = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(n) || n < 0) return DEFAULT_AGENT_FIRST_RESPONSE_SECONDS;
-  return Math.floor(n);
+  return wholeSeconds(n);
 }
 
 /** Stored default model, trimmed, or null when absent or not a model id. */
@@ -141,7 +147,8 @@ export function claudeSettingsPatch(body: unknown): { patch: Record<string, unkn
     if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
       return { error: "firstResponseSeconds must be a number >= 0" };
     }
-    patch.agentFirstResponseSeconds = Math.floor(n) === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS ? null : Math.floor(n);
+    const seconds = wholeSeconds(n);
+    patch.agentFirstResponseSeconds = seconds === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS ? null : seconds;
   }
   if (b.defaultModel !== undefined) {
     if (b.defaultModel !== null && typeof b.defaultModel !== "string") {

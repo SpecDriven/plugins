@@ -1,6 +1,6 @@
 {
   "name": "@specdriven/plugin-agent-claude",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "license": "Apache-2.0",
   "description": "Claude Code in the coding agent pane, with its sign-in and proxy settings",
   "type": "module",
@@ -41,9 +41,17 @@
     "react": "^19"
   },
   "devDependencies": {
+    "@hegeldev/hegel": "0.4.11",
+    "@hegeldev/hegel-darwin-arm64": "0.4.11",
+    "@hegeldev/hegel-linux-x64": "0.4.11",
+    "@koromix/koffi-darwin-arm64": "3.3.3",
+    "@koromix/koffi-linux-x64": "3.3.3",
     "@types/bun": "^1.4.2",
     "@types/react": "^19.2.17",
     "react": "^19.2.7",
     "typescript": "^5"
+  },
+  "overrides": {
+    "koffi": "3.3.3"
   }
 }

@@ -6,6 +6,7 @@
 // Claude goes through a proxy, the way the account's models serve a sign-in.
 
 import type { AccountModel } from "./accountModels";
+import { SENDABLE_TOKEN, UNSENDABLE_TOKEN, withoutToken } from "./auth";
 import { normalizeDefaultModel } from "./settings";
 
 /** How long the proxy gets to answer one page. */
@@ -45,6 +46,7 @@ export async function fetchProxyModels(
   fetchFn: typeof fetch = fetch,
   timeoutMs = PROXY_MODELS_TIMEOUT_MS,
 ): Promise<AccountModel[]> {
+  if (token && !SENDABLE_TOKEN.test(token)) throw new Error(UNSENDABLE_TOKEN);
   const base = url.endsWith("/") ? url : `${url}/`;
   const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
   if (token) {
@@ -57,7 +59,9 @@ export async function fetchProxyModels(
     const target = new URL("v1/models", base);
     target.searchParams.set("limit", "100");
     if (after) target.searchParams.set("after_id", after);
-    const res = await fetchFn(target, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetchFn(target, { headers, signal: AbortSignal.timeout(timeoutMs) }).catch((e: Error) => {
+      throw new Error(withoutToken(e.message, token));
+    });
     if (res.status === 401 || res.status === 403) {
       throw new Error(token ? `The proxy refused the token (HTTP ${res.status})` : `The proxy wants a token (HTTP ${res.status})`);
     }

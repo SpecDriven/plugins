@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../../plugins/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44773,11 +44773,14 @@ function normalizeClaudeProxyUrl(value) {
     return null;
   }
 }
+function wholeSeconds(n) {
+  return n > 0 && n < 1 ? 1 : Math.floor(n);
+}
 function normalizeAgentFirstResponseSeconds(value) {
   const n = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(n) || n < 0)
     return DEFAULT_AGENT_FIRST_RESPONSE_SECONDS;
-  return Math.floor(n);
+  return wholeSeconds(n);
 }
 function normalizeDefaultModel(value) {
   if (typeof value !== "string")
@@ -44823,7 +44826,8 @@ function claudeSettingsPatch(body) {
     if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
       return { error: "firstResponseSeconds must be a number >= 0" };
     }
-    patch.agentFirstResponseSeconds = Math.floor(n) === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS ? null : Math.floor(n);
+    const seconds = wholeSeconds(n);
+    patch.agentFirstResponseSeconds = seconds === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS ? null : seconds;
   }
   if (b.defaultModel !== undefined) {
     if (b.defaultModel !== null && typeof b.defaultModel !== "string") {
@@ -45063,10 +45067,10 @@ async function startLogin(email, deps = {}) {
     return launchLogin(f, claude, deps);
   (deps.fetchBinary ?? fetchBinary)().then((fetched) => {
     log.info("Claude Code fetched for the sign-in", { claude: fetched, stillWanted: f.inProgress });
-    if (!f.inProgress)
-      return;
     f.downloading = false;
     f.fetched = true;
+    if (!f.inProgress)
+      return signInChanged();
     launchLogin(f, fetched, deps);
   }, (e) => finish(f, e.message));
   return publicState(f);
@@ -45205,6 +45209,11 @@ async function logout(runner = run) {
   log.info("signed out", { claude });
   signInChanged();
 }
+var SENDABLE_TOKEN = /^[\x21-\x7e]+$/;
+var UNSENDABLE_TOKEN = "The proxy token has characters a request cannot carry — a space, a line break or a letter outside ASCII";
+function withoutToken(message, token) {
+  return token ? message.split(token).join("[token]") : message;
+}
 async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   let target;
   try {
@@ -45212,6 +45221,8 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   } catch {
     return { result: "unreachable", detail: "Not a url" };
   }
+  if (token && !SENDABLE_TOKEN.test(token))
+    return { result: "unauthorized", detail: UNSENDABLE_TOKEN };
   const headers = { "anthropic-version": "2023-06-01" };
   if (token) {
     headers.authorization = `Bearer ${token}`;
@@ -45226,7 +45237,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
     }
     return { result: "unexpected", detail: `Reachable, but it answered HTTP ${res.status}` };
   } catch (e) {
-    const message = e.name === "TimeoutError" ? "no answer in time" : e.message;
+    const message = e.name === "TimeoutError" ? "no answer in time" : withoutToken(e.message, token);
     return { result: "unreachable", detail: `Could not reach ${target.origin}: ${message}` };
   }
 }
@@ -46010,21 +46021,22 @@ async function fetchAccountModels(own, cwd, token, factory = currentQueryFactory
 }
 var cached = null;
 var pending2 = null;
-async function accountModels(ask, now = Date.now()) {
-  if (cached && now - cached.at < ACCOUNT_MODELS_TTL_MS)
+async function accountModels(ask, now = Date.now(), key = "") {
+  if (cached && cached.key === key && now - cached.at < ACCOUNT_MODELS_TTL_MS)
     return cached.probe;
-  if (!pending2) {
-    const asking = ask().then((probe2) => {
-      if (pending2 === asking)
-        cached = { probe: probe2, at: Date.now() };
+  if (pending2?.key !== key) {
+    const mine = { key, asking: Promise.resolve(NO_ACCOUNT) };
+    mine.asking = ask().then((probe2) => {
+      if (pending2 === mine)
+        cached = { key, probe: probe2, at: Date.now() };
       return probe2;
     }).finally(() => {
-      if (pending2 === asking)
+      if (pending2 === mine)
         pending2 = null;
     });
-    pending2 = asking;
+    pending2 = mine;
   }
-  return pending2;
+  return pending2.asking;
 }
 function forgetAccountModels() {
   cached = null;
@@ -46049,6 +46061,8 @@ function proxyModelsOf(rows, into = []) {
   return into;
 }
 async function fetchProxyModels(url, token, fetchFn = fetch, timeoutMs = PROXY_MODELS_TIMEOUT_MS) {
+  if (token && !SENDABLE_TOKEN.test(token))
+    throw new Error(UNSENDABLE_TOKEN);
   const base = url.endsWith("/") ? url : `${url}/`;
   const headers = { "anthropic-version": "2023-06-01" };
   if (token) {
@@ -46062,7 +46076,9 @@ async function fetchProxyModels(url, token, fetchFn = fetch, timeoutMs = PROXY_M
     target.searchParams.set("limit", "100");
     if (after)
       target.searchParams.set("after_id", after);
-    const res = await fetchFn(target, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetchFn(target, { headers, signal: AbortSignal.timeout(timeoutMs) }).catch((e) => {
+      throw new Error(withoutToken(e.message, token));
+    });
     if (res.status === 401 || res.status === 403) {
       throw new Error(token ? `The proxy refused the token (HTTP ${res.status})` : `The proxy wants a token (HTTP ${res.status})`);
     }
@@ -46216,7 +46232,7 @@ var plugin = {
       const token = await storedToken(secrets);
       if ((await effectiveClaudeAuth(own, cwd, token)).mode !== "login")
         return NO_ACCOUNT;
-      return accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : NO_ACCOUNT);
+      return accountModels(async () => (await loginStatus()).loggedIn ? fetchAccountModels(own, cwd, token) : NO_ACCOUNT, Date.now(), "login");
     };
     const signedInAccountModels = async () => (await signedInAccount()).models;
     const offeredModels = async () => {
@@ -46227,7 +46243,10 @@ var plugin = {
       if (!auth.proxy)
         return [];
       const { url, token } = auth.proxy;
-      return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }))).models;
+      const key = `proxy
+${url}
+${token ?? ""}`;
+      return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }), Date.now(), key)).models;
     };
     const answer = async () => {
       const own = await settings();
@@ -46239,6 +46258,9 @@ var plugin = {
       const body = await req.json().catch(() => ({}));
       if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
         return json({ error: "Paste the proxy's token" }, 400);
+      }
+      if (!SENDABLE_TOKEN.test(body.token.trim())) {
+        return json({ error: "A token is letters, digits and punctuation, with no spaces or line breaks" }, 400);
       }
       await secrets.save({ token: body.token.trim() });
       signInChanged2();
@@ -46297,10 +46319,10 @@ var plugin = {
       return answer();
     };
     const postLoginCheck = async () => {
+      forgetAccountModels();
       const login = await loginStatus();
       if (!login.loggedIn || login.method === "api_key")
         return json({ login, models: [], error: null, account: null });
-      forgetAccountModels();
       try {
         const { account, models } = await signedInAccount();
         return json({ login, models, error: null, account });
@@ -46349,5 +46371,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=DC48194E598DD49C64756E2164756E21
+//# debugId=E2B64CD961621C1E64756E2164756E21
 //# sourceMappingURL=host.js.map
