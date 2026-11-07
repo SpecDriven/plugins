@@ -45225,6 +45225,83 @@ function inList(model, all, listed) {
   return narrowModels(all, listed).some((m2) => m2.value === model || m2.resolvedModel === model);
 }
 
+// src/contextUsage.ts
+var KINDS = new Set(["used", "buffer", "free", "deferred"]);
+function categoryId(category) {
+  if (category.id)
+    return category.id;
+  return category.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+function kindOf(category) {
+  if (category.kind && KINDS.has(category.kind))
+    return category.kind;
+  if (category.isDeferred)
+    return "deferred";
+  if (/free space/i.test(category.name))
+    return "free";
+  if (/buffer/i.test(category.name))
+    return "buffer";
+  return "used";
+}
+function memoryName(path) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length > 1 ? parts.slice(-2).join("/") : parts[0] ?? path;
+}
+function itemsById(answer) {
+  const map = new Map;
+  const put = (ids, items) => {
+    if (!items || items.length === 0)
+      return;
+    for (const id of ids)
+      map.set(id, items);
+  };
+  const tools = answer.mcpTools ?? [];
+  put(["mcp_tools"], tools.filter((t) => t.isLoaded !== false).map((t) => ({ name: t.name, detail: t.serverName, tokens: t.tokens })));
+  put(["mcp_tools_deferred", "deferred_mcp_tools"], tools.filter((t) => t.isLoaded === false).map((t) => ({ name: t.name, detail: t.serverName, tokens: t.tokens })));
+  put(["system_tools"], answer.systemTools?.map((t) => ({ name: t.name, tokens: t.tokens })));
+  put(["system_prompt"], answer.systemPromptSections?.map((s) => ({ name: s.name, tokens: s.tokens })));
+  put(["memory_files"], answer.memoryFiles?.map((f) => ({ name: memoryName(f.path), detail: f.type, tokens: f.tokens })));
+  put(["skills"], answer.skills?.skillFrontmatter?.map((s) => ({ name: s.name, detail: s.source, tokens: s.tokens })));
+  put(["custom_agents", "agents"], answer.agents?.map((a) => ({ name: a.agentType, detail: a.source, tokens: a.tokens })));
+  return map;
+}
+function contextUsageOf(answer, detail, at) {
+  const items = itemsById(answer);
+  const slices = answer.categories.map((c) => {
+    const id = categoryId(c);
+    const kind = kindOf(c);
+    const list = kind === "used" || kind === "deferred" ? items.get(id) : undefined;
+    return { id, label: c.name, tokens: c.tokens, kind, ...list ? { items: list } : {} };
+  });
+  return {
+    at,
+    ...answer.model ? { model: answer.model } : {},
+    totalTokens: answer.totalTokens,
+    maxTokens: answer.maxTokens > 0 ? answer.maxTokens : null,
+    ...answer.isAutoCompactEnabled && answer.autoCompactThreshold ? { autoCompactAt: answer.autoCompactThreshold } : {},
+    slices,
+    detail: detail === "full" ? "measured" : "estimate"
+  };
+}
+function tokensInWindow(usage) {
+  if (!usage)
+    return null;
+  const parts = [usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens, usage.output_tokens];
+  if (parts.every((n) => typeof n !== "number"))
+    return null;
+  return parts.reduce((sum, n) => sum + (typeof n === "number" ? n : 0), 0);
+}
+function contextWindowOf(modelUsage, model) {
+  if (!modelUsage || typeof modelUsage !== "object")
+    return null;
+  const entries = Object.entries(modelUsage);
+  const own = model ? entries.find(([name]) => name === model)?.[1]?.contextWindow : undefined;
+  if (typeof own === "number" && own > 0)
+    return own;
+  const sizes = entries.map(([, u]) => u?.contextWindow).filter((n) => typeof n === "number" && n > 0);
+  return sizes.length ? Math.max(...sizes) : null;
+}
+
 // src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
@@ -45487,6 +45564,10 @@ class ClaudeSession {
   firstResponseMs = 0;
   firstResponse = null;
   apiRetries = 0;
+  contextProbe = "unknown";
+  contextTicket = 0;
+  lastWindowTokens = null;
+  contextWindow = null;
   constructor(host) {
     this.host = host;
   }
@@ -45555,6 +45636,44 @@ class ClaudeSession {
     this.disarmFirstResponse();
     this.input.close();
     this.abort.abort();
+  }
+  async contextUsage(detail) {
+    const query = this.query;
+    if (query?.getContextUsage && this.contextProbe !== "no") {
+      try {
+        const answer = await query.getContextUsage({ detail });
+        this.contextProbe = "yes";
+        return contextUsageOf(answer, detail, new Date().toISOString());
+      } catch (e) {
+        if (this.contextProbe === "yes") {
+          if (detail === "full")
+            throw e;
+          return null;
+        }
+        this.contextProbe = "no";
+      }
+    }
+    return this.totalsFromTurns();
+  }
+  totalsFromTurns() {
+    if (this.lastWindowTokens === null)
+      return null;
+    return {
+      at: new Date().toISOString(),
+      ...this.model ? { model: this.model } : {},
+      totalTokens: this.lastWindowTokens,
+      maxTokens: this.contextWindow,
+      detail: "estimate"
+    };
+  }
+  countContext() {
+    const ticket = ++this.contextTicket;
+    const query = this.query;
+    this.contextUsage("summary").then((usage) => {
+      if (!usage || this.final || ticket !== this.contextTicket || query !== this.query)
+        return;
+      this.host.context?.(usage);
+    }).catch(() => {});
   }
   async refresh() {
     if (this.final)
@@ -45651,6 +45770,7 @@ class ClaudeSession {
       ...account ? { account } : {},
       ...this.effort ? { effort: this.effort } : {}
     });
+    this.countContext();
     this.refreshIfWanted();
   }
   async pump(query) {
@@ -45704,11 +45824,20 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
       this.host.update({ commands: this.commands });
       return;
     }
+    if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
+      const tokens = tokensInWindow(msg.message.usage);
+      if (tokens !== null && tokens > 0)
+        this.lastWindowTokens = tokens;
+    }
     for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream))
       this.host.emit(body);
     if (msg.type === "result") {
+      this.contextWindow = contextWindowOf(msg.modelUsage, this.model) ?? this.contextWindow;
       this.host.turnEnded();
+      this.countContext();
       this.refreshIfWanted();
+    } else if (msg.type === "system" && msg.subtype === "compact_boundary") {
+      this.countContext();
     }
   }
   async loadCommands() {
@@ -45795,7 +45924,8 @@ function createClaudeProvider(options = {}) {
       oneShot: true,
       canChangeModelMidSession: true,
       effort: true,
-      images: true
+      images: true,
+      contextUsage: "breakdown"
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -46341,5 +46471,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=D1B927618D3B424A64756E2164756E21
+//# debugId=52EAA8A72D8FDCCA64756E2164756E21
 //# sourceMappingURL=host.js.map

@@ -18,6 +18,7 @@ import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
 import { writeState } from "@specdriven/app/src/server/state";
 import {
   codexAnswers,
+  codexContextUsage,
   codexPolicy,
   codexQuestions,
   codexSandboxPolicy,
@@ -973,4 +974,44 @@ test("an unknown agent is refused, and Codex needs its CLI", async () => {
   // The state says which agents this machine can run.
   const { agents } = (await (await api("/api/state")).json()) as { agents: { id: string; available: boolean }[] };
   expect(agents.find((a) => a.id === "codex")?.available).toBe(false);
+});
+
+// The session popover's context meter (specs/agents/agent-pane.feature.md
+// S10): Codex says how many tokens the window holds and how big it is.
+/** A session's context count; ChatSessionMeta has it only from the app that has the meter. */
+type Count = { totalTokens: number; maxTokens: number | null; detail: string; model?: string; slices?: unknown[] };
+const contextOf = (meta: ChatSessionMeta) => (meta as { context?: Count }).context;
+
+test("Codex's token usage is the context count, the last request's tokens of the model's window", () => {
+  const usage = (last: number, window: number | null) => ({
+    threadId: "thread-1",
+    turnId: "turn-1",
+    tokenUsage: {
+      total: { totalTokens: 90_000, inputTokens: 80_000, cachedInputTokens: 60_000, outputTokens: 10_000, reasoningOutputTokens: 2_000 },
+      last: { totalTokens: last, inputTokens: last - 500, cachedInputTokens: 20_000, outputTokens: 500, reasoningOutputTokens: 100 },
+      modelContextWindow: window,
+    },
+  });
+  expect(codexContextUsage(usage(31_000, 272_000))).toEqual({ totalTokens: 31_000, maxTokens: 272_000, detail: "estimate" });
+  expect(codexContextUsage(usage(31_000, null))).toEqual({ totalTokens: 31_000, maxTokens: null, detail: "estimate" });
+  expect(codexContextUsage({ threadId: "thread-1" })).toBeNull();
+  // Not a transcript line.
+  expect(mapCodexNotification("thread/tokenUsage/updated", usage(1, 2), { turn: 1 }, newCodexStream())).toEqual([]);
+});
+
+test.if("refreshChatContext" in engine)("a Codex session shows its context count as Codex reports it, once per change", async () => {
+  const { id, codex } = await idleCodexSession();
+  const tokens = (last: number) => ({
+    threadId: "thread-1",
+    turnId: "turn-1",
+    tokenUsage: { total: { totalTokens: last }, last: { totalTokens: last }, modelContextWindow: 272_000 },
+  });
+  codex.notify("thread/tokenUsage/updated", tokens(31_000));
+  const s = await until(() => snapshot(id), (v) => contextOf(v.meta) !== undefined);
+  expect(contextOf(s.meta)).toMatchObject({ totalTokens: 31_000, maxTokens: 272_000, detail: "estimate" });
+  codex.notify("thread/tokenUsage/updated", tokens(31_000));
+  codex.notify("thread/tokenUsage/updated", tokens(52_000));
+  await until(() => snapshot(id), (v) => contextOf(v.meta)?.totalTokens === 52_000);
+  // Codex has nothing to count on request.
+  expect((await api(`/api/agent/chat/${id}/context`, "POST", {})).status).toBe(409);
 });

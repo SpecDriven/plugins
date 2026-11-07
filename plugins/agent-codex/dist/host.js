@@ -37,19 +37,19 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/cli.ts
+// src/cli.ts
 var CODEX_BIN = "codex";
 var probe = null;
 function codexAvailable() {
   return probe ? probe() : which(CODEX_BIN) !== null;
 }
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/oneShot.ts
+// src/oneShot.ts
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/codexChat.ts
+// src/codexChat.ts
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 var nodeSpawn = (o) => {
@@ -241,6 +241,14 @@ function text(value) {
 }
 function number(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function codexContextUsage(params) {
+  const usage = record(params.tokenUsage);
+  const total = number(record(usage?.last)?.totalTokens);
+  if (total === null)
+    return null;
+  const window = number(usage?.modelContextWindow);
+  return { totalTokens: total, maxTokens: window !== null && window > 0 ? window : null, detail: "estimate" };
 }
 var CODEX_TOOL = {
   command: "Bash",
@@ -560,7 +568,7 @@ function codexAnswers(questions, answers) {
   return { answers: out };
 }
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/oneShot.ts
+// src/oneShot.ts
 var KILL_GRACE_MS = 3000;
 var STDERR_TAIL = 5;
 function codexExecArgs(cwd, outFile, schemaFile, model) {
@@ -740,7 +748,7 @@ function runExec(req, args) {
   });
 }
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/provider.ts
+// src/provider.ts
 var CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
 var str = (value) => typeof value === "string" ? value : null;
 var rec = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -764,6 +772,8 @@ class CodexSession {
   stderrTail = [];
   threadId = null;
   mode;
+  model = null;
+  lastCount = null;
   constructor(host, name, cwd, mode) {
     this.host = host;
     this.name = name;
@@ -809,6 +819,7 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
     this.host.note("info", "init", `Codex${info.cliVersion ? ` ${info.cliVersion}` : ""} · ${info.model ?? "no model"} · ${this.cwd}`);
     this.host.note("info", "init", "Permission modes map onto Codex's approval policy and sandbox; a change applies from the next turn.");
     client.request("thread/name/set", { threadId: info.threadId, name: this.name });
+    this.model = info.model ?? null;
     this.host.ready({ agentSessionId: info.threadId, ...info.model ? { model: info.model } : {} });
     if (prompt || images?.length) {
       try {
@@ -858,6 +869,14 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
   notification(method, params) {
     if (this.final)
       return;
+    if (method === "thread/tokenUsage/updated") {
+      const usage = codexContextUsage(params);
+      if (!usage || usage.totalTokens === this.lastCount)
+        return;
+      this.lastCount = usage.totalTokens;
+      this.host.context?.({ ...usage, ...this.model ? { model: this.model } : {} });
+      return;
+    }
     if (method === "turn/started")
       this.host.turnStarted();
     if (method === "serverRequest/resolved") {
@@ -1032,7 +1051,8 @@ var codexProvider = {
     hasAccount: false,
     rememberPermissions: "session",
     oneShot: true,
-    images: true
+    images: true,
+    contextUsage: "totals"
   },
   defaultPermissionMode: "default",
   loginHint: {
@@ -1055,7 +1075,7 @@ var codexProvider = {
   oneShot: codexOneShot
 };
 
-// ../../../../plugins-image-paste/plugins/agent-codex/src/host.ts
+// src/host.ts
 var plugin = {
   name: "agent-codex",
   inject: ["agents"],
@@ -1069,5 +1089,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=9BB0670AAA9A659F64756E2164756E21
+//# debugId=1D1DD145BB2646FC64756E2164756E21
 //# sourceMappingURL=host.js.map
