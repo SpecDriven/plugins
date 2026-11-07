@@ -34,7 +34,22 @@ export interface PastedImage {
   path: string;
 }
 
-export type PaneStartOptions = AgentStartOptions & { model?: string; effort?: ClaudeEffort; images?: PastedImage[] };
+/** An MCP server the app hands every session (SpecDriven 0.1.237 and later;
+    the Confluence server while a wiki token is saved), run over stdio. */
+export interface AgentMcpServer {
+  /** The server's name as the agent lists its tools (`mcp__<name>__<tool>`). */
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+export type PaneStartOptions = AgentStartOptions & {
+  model?: string;
+  effort?: ClaudeEffort;
+  images?: PastedImage[];
+  mcpServers?: AgentMcpServer[];
+};
 
 export type PaneCapabilities = AgentProvider["capabilities"] & {
   canChangeModelMidSession?: boolean;

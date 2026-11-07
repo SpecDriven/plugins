@@ -45951,6 +45951,7 @@ function createClaudeProvider(options = {}) {
           systemPrompt: { type: "preset", preset: "claude_code" },
           settingSources: ["user", "project", "local"],
           ...opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {},
+          ...opts.mcpServers?.length ? { mcpServers: mcpServerConfigs(opts.mcpServers) } : {},
           ...resume ? { resume } : {},
           ...runModel ? { model: runModel } : {},
           ...runEffort ? { effort: runEffort } : {},
@@ -46049,6 +46050,9 @@ function createClaudeProvider(options = {}) {
       }
     }
   };
+}
+function mcpServerConfigs(servers) {
+  return Object.fromEntries(servers.map((s) => [s.name, { type: "stdio", command: s.command, args: [...s.args], env: { ...s.env } }]));
 }
 
 // src/accountModels.ts
@@ -46471,5 +46475,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=52EAA8A72D8FDCCA64756E2164756E21
+//# debugId=5BE4C6AD86E798F164756E2164756E21
 //# sourceMappingURL=host.js.map

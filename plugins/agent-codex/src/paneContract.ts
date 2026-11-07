@@ -1,7 +1,8 @@
 // What the app's pane hands an agent that newer apps added: pasted images
-// (SpecDriven 0.1.230 and later). Declared here rather than imported from
-// @specdriven/host so the plugin still type-checks against the older apps
-// it runs in — they lack these types and simply never pass images.
+// (SpecDriven 0.1.230 and later) and MCP servers (0.1.237 and later).
+// Declared here rather than imported from @specdriven/host so the plugin
+// still type-checks against the older apps it runs in — they lack these
+// types and simply never pass them.
 
 import type { AgentHost, AgentProvider, AgentStartOptions } from "@specdriven/host";
 
@@ -13,7 +14,17 @@ export interface PastedImage {
   path: string;
 }
 
-export type PaneStartOptions = AgentStartOptions & { images?: PastedImage[] };
+/** An MCP server the app hands every session (SpecDriven 0.1.237 and later;
+    the Confluence server while a wiki token is saved), run over stdio. */
+export interface AgentMcpServer {
+  /** The server's name as the agent lists its tools (`mcp__<name>__<tool>`). */
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+export type PaneStartOptions = AgentStartOptions & { images?: PastedImage[]; mcpServers?: AgentMcpServer[] };
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
   capabilities: AgentProvider["capabilities"] & { images?: boolean; contextUsage?: "breakdown" | "totals" };

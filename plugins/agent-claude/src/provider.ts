@@ -19,6 +19,7 @@ import type {
   SDKMessage,
   SDKUserMessage,
   SlashCommand,
+  McpStdioServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 import { AgentError, normalizePermissionMode } from "@specdriven/host";
 import type {
@@ -39,6 +40,7 @@ import { inList, narrowModels } from "./modelMenu";
 import type {
   AgentChoices,
   AgentDefaultsPatch,
+  AgentMcpServer,
   AgentModelOption,
   ChatContextUsage,
   ContextDetail,
@@ -966,6 +968,9 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
           settingSources: ["user", "project", "local"],
           // With a code repo the specs live elsewhere; let Claude read them.
           ...(opts.codeRepo ? { additionalDirectories: [opts.dataRepo] } : {}),
+          // The MCP servers the app asks for (AgentStartOptions.mcpServers):
+          // the Confluence server while a wiki token is saved.
+          ...(opts.mcpServers?.length ? { mcpServers: mcpServerConfigs(opts.mcpServers) } : {}),
           ...(resume ? { resume } : {}),
           ...(runModel ? { model: runModel } : {}),
           ...(runEffort ? { effort: runEffort } : {}),
@@ -1076,3 +1081,9 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
   };
 }
 
+/** The app's MCP servers (AgentStartOptions.mcpServers) as the SDK's stdio server configs, by name. */
+export function mcpServerConfigs(servers: AgentMcpServer[]): Record<string, McpStdioServerConfig> {
+  return Object.fromEntries(
+    servers.map((s) => [s.name, { type: "stdio" as const, command: s.command, args: [...s.args], env: { ...s.env } }]),
+  );
+}

@@ -99,7 +99,7 @@ class CodexClient {
     const spawnFn = options.spawn ?? spawner ?? nodeSpawn;
     this.proc = spawnFn({
       bin: which(CODEX_BIN) ?? CODEX_BIN,
-      args: ["app-server"],
+      args: ["app-server", ...options.extraArgs ?? []],
       cwd: options.cwd,
       env: options.env ?? process.env,
       onStdout: readStdout,
@@ -748,6 +748,30 @@ function runExec(req, args) {
   });
 }
 
+// src/mcpConfig.ts
+function tomlString(value) {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/[\u0000-\u001f\u007f]/g, (c) => {
+    const named = { "\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r" };
+    return named[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, "0").toUpperCase()}`;
+  });
+  return `"${escaped}"`;
+}
+function tomlKey(name) {
+  return name.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+function tomlServer(server) {
+  const env = Object.entries(server.env).map(([k, v]) => `${tomlKey(k)} = ${tomlString(v)}`);
+  const parts = [
+    `command = ${tomlString(server.command)}`,
+    `args = [${server.args.map(tomlString).join(", ")}]`,
+    ...env.length ? [`env = { ${env.join(", ")} }`] : []
+  ];
+  return `{ ${parts.join(", ")} }`;
+}
+function codexMcpArgs(servers) {
+  return servers.flatMap((s) => ["-c", `mcp_servers.${tomlKey(s.name)}=${tomlServer(s)}`]);
+}
+
 // src/provider.ts
 var CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
 var str = (value) => typeof value === "string" ? value : null;
@@ -1063,6 +1087,7 @@ var codexProvider = {
     const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode);
     session.client = new CodexClient({
       cwd: opts.cwd,
+      ...opts.mcpServers?.length ? { extraArgs: codexMcpArgs(opts.mcpServers) } : {},
       onNotification: (method, params) => session.notification(method, params),
       onServerRequest: (id, method, params) => session.request(id, method, params),
       onStderr: session.stderr,
@@ -1089,5 +1114,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=1D1DD145BB2646FC64756E2164756E21
+//# debugId=BACD7FF9186736DB64756E2164756E21
 //# sourceMappingURL=host.js.map

@@ -121,6 +121,8 @@ export interface CodexClientOptions {
   onStderr: (line: string) => void;
   onExit: (code: number | null, error?: Error) => void;
   env?: Record<string, string | undefined>;
+  /** Arguments after `app-server`: the `-c` overrides for this process (src/mcpConfig.ts). */
+  extraArgs?: string[];
   spawn?: CodexSpawn;
 }
 
@@ -143,7 +145,7 @@ export class CodexClient {
     const spawnFn = options.spawn ?? spawner ?? nodeSpawn;
     this.proc = spawnFn({
       bin: which(CODEX_BIN) ?? CODEX_BIN,
-      args: ["app-server"],
+      args: ["app-server", ...(options.extraArgs ?? [])],
       cwd: options.cwd,
       env: options.env ?? process.env,
       onStdout: readStdout,
