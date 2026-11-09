@@ -45352,6 +45352,28 @@ function describeAccount(info, baseUrl) {
   }
   return { billing: "none", label: "Not logged in", detail: "Sign in with your Claude account's email in Settings → Claude." };
 }
+function describeSignIn(choice) {
+  if (choice.mode === "proxy") {
+    let endpoint;
+    try {
+      endpoint = choice.proxyUrl ? new URL(choice.proxyUrl) : undefined;
+    } catch {}
+    if (!endpoint) {
+      return { billing: "api", label: "API", detail: "API · no address set yet — enter one in Settings → Claude" };
+    }
+    const label = LOCAL_HOSTS.test(endpoint.hostname) ? "PROXY" : endpoint.hostname;
+    return { billing: "api", label: `API:${label}`, detail: `API calls go to ${endpoint.host}` };
+  }
+  const login = choice.login;
+  if (login?.loggedIn) {
+    const who = login.email ? ` · ${login.email}` : "";
+    if (login.method === "oauth_token") {
+      return { billing: "plan", label: "Claude plan", detail: `Claude subscription token${who}` };
+    }
+    return { billing: "plan", label: "Claude account", detail: `Claude account${who}` };
+  }
+  return { billing: "none", label: "Not logged in", detail: "Sign in with your Claude account's email in Settings → Claude." };
+}
 
 class InputQueue {
   items = [];
@@ -45991,7 +46013,10 @@ function createClaudeProvider(options = {}) {
         ...m2.efforts ? { efforts: m2.efforts } : {}
       })) : ALIAS_MENU;
       const models = narrowModels(all, await listedModels()).map((m2) => ("description" in m2) && m2.description === "" ? { value: m2.value, displayName: m2.displayName } : m2);
-      return { models, model: await defaultModel(own), effort: own.defaultEffort };
+      const account = await options.signIn?.().catch(() => {
+        return;
+      });
+      return { models, model: await defaultModel(own), effort: own.defaultEffort, ...account ? { account } : {} };
     },
     async setDefaults(patch) {
       const section = {};
@@ -46253,6 +46278,7 @@ function withReportedModels(provider, offered) {
 
 // src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
+var SIGN_IN_TTL_MS = 30000;
 var TOKEN_STORE = "token";
 var guarded = (handler) => (req, params) => {
   if (isHostedMode())
@@ -46313,6 +46339,7 @@ var plugin = {
       token: () => storedToken(secrets),
       listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
       accountModels: () => offeredModels(),
+      signIn: () => currentSignIn(),
       saveSettings: async (patch) => {
         const parsed = claudeSettingsPatch(patch);
         if ("error" in parsed)
@@ -46320,8 +46347,11 @@ var plugin = {
         await config.settings.write(parsed.patch);
       }
     }), () => offeredModels())));
+    let signInLogin = null;
+    let signInAt = -Infinity;
     const signInChanged2 = () => {
       forgetAccountModels();
+      signInAt = -Infinity;
       agents2.changed?.("claude");
     };
     ctx.effect(() => onSignInChange(signInChanged2));
@@ -46360,6 +46390,17 @@ var plugin = {
 ${url}
 ${token ?? ""}`;
       return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }), Date.now(), key)).models;
+    };
+    const currentSignIn = async () => {
+      const own = await settings();
+      const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
+      if (auth.mode !== "login")
+        return describeSignIn({ mode: "proxy", proxyUrl: auth.proxy?.url ?? null, login: null });
+      if (!signInLogin || Date.now() - signInAt > SIGN_IN_TTL_MS) {
+        signInLogin = await loginStatus();
+        signInAt = Date.now();
+      }
+      return describeSignIn({ mode: "login", proxyUrl: null, login: signInLogin });
     };
     const answer = async () => {
       const own = await settings();
@@ -46475,5 +46516,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=5BE4C6AD86E798F164756E2164756E21
+//# debugId=22B9218BA4DEE3E164756E2164756E21
 //# sourceMappingURL=host.js.map
