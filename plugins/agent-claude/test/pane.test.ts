@@ -1495,7 +1495,7 @@ test("describeSignIn says API through the proxy, or the Claude account and wheth
 
 test("the pane's choices carry the sign-in a new session would start under, when the host says", async () => {
   const signIn = async () => describeSignIn({ mode: "proxy", proxyUrl: "http://127.0.0.1:4000", login: null });
-  expect((await createClaudeProvider({ signIn }).choices({ dataRepo: null })).account).toMatchObject({ billing: "api" });
+  const choices = (await createClaudeProvider({ signIn }).choices({ dataRepo: null })) as import("../src/paneContract").AgentChoices; expect(choices.account).toMatchObject({ billing: "api" });
   expect("account" in (await createClaudeProvider().choices({ dataRepo: null }))).toBe(false);
   // A sign-in that cannot be read leaves the menus as they are.
   const broken = createClaudeProvider({ signIn: async () => Promise.reject(new Error("no CLI")) });
