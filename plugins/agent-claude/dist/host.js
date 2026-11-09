@@ -46276,6 +46276,47 @@ function withReportedModels(provider, offered) {
   });
 }
 
+// src/reconnect.ts
+var RECONNECT_TRIES = 3;
+var RECONNECT_PAUSE_MS = 1000;
+async function reconnectProxy(cwd, deps) {
+  const auth = await effectiveClaudeAuth(await deps.settings(), cwd, await deps.token(), deps.env ?? process.env);
+  if (!auth.proxy)
+    return null;
+  const { url, token } = auth.proxy;
+  const check = deps.check ?? ((u, t) => checkProxy(u, t));
+  const sleep = deps.sleep ?? ((ms2) => new Promise((r) => setTimeout(r, ms2)));
+  let last = { result: "unreachable", detail: "" };
+  for (let attempt = 1;attempt <= RECONNECT_TRIES; attempt++) {
+    last = await check(url, token);
+    if (last.result !== "unreachable")
+      break;
+    if (attempt < RECONNECT_TRIES)
+      await sleep(RECONNECT_PAUSE_MS);
+  }
+  if (last.result !== "unreachable")
+    deps.answered?.();
+  switch (last.result) {
+    case "ok":
+      return { ok: true, detail: `The API at ${url} answers`, url };
+    case "unexpected":
+      return { ok: true, detail: `The API at ${url} answers (${last.detail})`, url };
+    case "unauthorized":
+      return { ok: false, detail: `The API at ${url} answers but refuses the token — ${last.detail}. Check Settings → Claude.`, url };
+    case "unreachable":
+      return {
+        ok: false,
+        detail: `No answer from the API at ${url} after ${RECONNECT_TRIES} tries — is the proxy running? (${last.detail})`,
+        url
+      };
+  }
+}
+function withReconnect(provider, deps) {
+  return Object.assign(provider, {
+    reconnect: ({ cwd }) => reconnectProxy(cwd, deps)
+  });
+}
+
 // src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var SIGN_IN_TTL_MS = 30000;
@@ -46334,7 +46375,7 @@ var plugin = {
     const data = ctx.need("data");
     const secrets = config.secrets(TOKEN_STORE);
     const settings = async () => claudeSettingsOf(await config.settings.read());
-    ctx.effect(() => agents2.register(withReportedModels(createClaudeProvider({
+    ctx.effect(() => agents2.register(withReconnect(withReportedModels(createClaudeProvider({
       settings,
       token: () => storedToken(secrets),
       listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
@@ -46346,7 +46387,7 @@ var plugin = {
           throw new AgentError(400, parsed.error);
         await config.settings.write(parsed.patch);
       }
-    }), () => offeredModels())));
+    }), () => offeredModels()), { settings, token: () => storedToken(secrets), answered: () => forgetAccountModels() })));
     let signInLogin = null;
     let signInAt = -Infinity;
     const signInChanged2 = () => {
@@ -46516,5 +46557,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=22B9218BA4DEE3E164756E2164756E21
+//# debugId=69EF4C9184EC4CA664756E2164756E21
 //# sourceMappingURL=host.js.map
