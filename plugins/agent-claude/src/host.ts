@@ -31,11 +31,14 @@ import { fetchProxyModels } from "./proxyModels";
 import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
 import { listedClaudeModels, withReportedModels } from "./models";
-import { createClaudeProvider } from "./provider";
+import { createClaudeProvider, describeSignIn } from "./provider";
 import { ADOPTED_KEY, CLAUDE_LEGACY_KEYS, claudeSettingsOf, claudeSettingsPatch } from "./settings";
 import type { ClaudeSettingsValues } from "./settings";
 
 export const DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
+
+/** How long `claude auth status` stands for the pane header's chip. */
+const SIGN_IN_TTL_MS = 30_000;
 
 /** The secret store the proxy token lives in (HostConfig.secrets). */
 export const TOKEN_STORE = "token";
@@ -117,6 +120,8 @@ const plugin: Plugin<Context, HostConfig> = {
           token: () => storedToken(secrets),
           listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
           accountModels: () => offeredModels(),
+          // The pane header's API / ACNT chip before a session says.
+          signIn: () => currentSignIn(),
           // The pane's model and effort picks become Settings → Claude's defaults.
           saveSettings: async (patch) => {
             const parsed = claudeSettingsPatch(patch);
@@ -135,8 +140,11 @@ const plugin: Plugin<Context, HostConfig> = {
     // and credentials. The app re-reads the one and refreshes the other
     // (AgentSession.refresh); an app from before `changed` restarts instead.
     // The account's models go with the old sign-in too.
+    let signInLogin: LoginStatus | null = null;
+    let signInAt = -Infinity;
     const signInChanged = () => {
       forgetAccountModels();
+      signInAt = -Infinity;
       (agents as { changed?(id: string): void }).changed?.("claude");
     };
     ctx.effect(() => onSignInChange(signInChanged));
@@ -187,6 +195,21 @@ const plugin: Plugin<Context, HostConfig> = {
       // switched away from while it was being asked for — is never offered.
       const key = `proxy\n${url}\n${token ?? ""}`;
       return (await accountModels(async () => ({ account: null, models: await fetchProxyModels(url, token) }), Date.now(), key)).models;
+    };
+
+    /** describeSignIn for what Settings chose: the proxy's address, or the
+        account `claude auth status` reports. The CLI's answer is kept a
+        while — every model menu that mounts asks — and dropped with the
+        sign-in. */
+    const currentSignIn = async () => {
+      const own = await settings();
+      const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
+      if (auth.mode !== "login") return describeSignIn({ mode: "proxy", proxyUrl: auth.proxy?.url ?? null, login: null });
+      if (!signInLogin || Date.now() - signInAt > SIGN_IN_TTL_MS) {
+        signInLogin = await loginStatus();
+        signInAt = Date.now();
+      }
+      return describeSignIn({ mode: "login", proxyUrl: null, login: signInLogin });
     };
 
     const answer = async (): Promise<Response> => {

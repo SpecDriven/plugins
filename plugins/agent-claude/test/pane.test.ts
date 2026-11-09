@@ -1182,7 +1182,7 @@ test.if(appHasComposerBar)("the pane switches a running Claude's model and effor
 
 test.if(appHasComposerBar)("the pane's choices are the models the sign-in offers, else Claude Code's aliases, narrowed to the data repo's list", async () => {
   const listed = await (await api("/api/agent/agents/claude/choices")).json();
-  expect(listed.choices).toEqual({
+  expect({ ...listed.choices, account: undefined }).toEqual({
     models: [
       { value: "opus", displayName: "Opus", description: "Claude Code's latest Opus" },
       { value: "sonnet", displayName: "Sonnet", description: "Claude Code's latest Sonnet" },
@@ -1468,4 +1468,41 @@ test.if("refreshChatContext" in engine)("a Claude Code that cannot count its con
   expect(contextOf(s.meta)).toMatchObject({ model: "claude-opus-5", totalTokens: 21_500, maxTokens: 200_000, detail: "estimate" });
   expect(contextOf(s.meta)).not.toHaveProperty("slices");
   expect(fake.contextAsks).toHaveLength(1);
+});
+
+// specs/agents/agent-pane.feature.md "The pane header says whether the
+// agent spends an account or the API": the chip before any session.
+import { describeSignIn } from "../src/provider";
+
+test("describeSignIn says API through the proxy, or the Claude account and whether it is signed in", () => {
+  expect(describeSignIn({ mode: "proxy", proxyUrl: "http://localhost:6655/anthropic/", login: null })).toEqual({
+    billing: "api",
+    label: "API:PROXY",
+    detail: "API calls go to localhost:6655",
+  });
+  expect(describeSignIn({ mode: "proxy", proxyUrl: "https://gw.example.com/v1", login: null })).toMatchObject({
+    billing: "api",
+    label: "API:gw.example.com",
+  });
+  expect(describeSignIn({ mode: "proxy", proxyUrl: null, login: null })).toMatchObject({ billing: "api", label: "API" });
+  const login = (loggedIn: boolean, method: string, email: string | null) =>
+    describeSignIn({ mode: "login", proxyUrl: null, login: { loggedIn, method, email } });
+  expect(login(true, "claude.ai", "a@b.c")).toEqual({ billing: "plan", label: "Claude account", detail: "Claude account · a@b.c" });
+  expect(login(true, "oauth_token", null)).toMatchObject({ billing: "plan", label: "Claude plan" });
+  expect(login(false, "none", null)).toMatchObject({ billing: "none", label: "Not logged in" });
+  expect(login(false, "missing", null).billing).toBe("none");
+});
+
+test("the pane's choices carry the sign-in a new session would start under, when the host says", async () => {
+  const signIn = async () => describeSignIn({ mode: "proxy", proxyUrl: "http://127.0.0.1:4000", login: null });
+  const choices = (await createClaudeProvider({ signIn }).choices({ dataRepo: null })) as import("../src/paneContract").AgentChoices; expect(choices.account).toMatchObject({ billing: "api" });
+  expect("account" in (await createClaudeProvider().choices({ dataRepo: null }))).toBe(false);
+  // A sign-in that cannot be read leaves the menus as they are.
+  const broken = createClaudeProvider({ signIn: async () => Promise.reject(new Error("no CLI")) });
+  expect((await broken.choices({ dataRepo: null })).models.length).toBeGreaterThan(0);
+});
+
+test.if(appHasComposerBar)("the app's choices route carries the sign-in, Not logged in with no one signed in", async () => {
+  const { choices } = await (await api("/api/agent/agents/claude/choices")).json();
+  expect(choices.account).toMatchObject({ billing: "none", label: "Not logged in" });
 });

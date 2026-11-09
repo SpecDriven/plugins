@@ -145,6 +145,48 @@ export function describeAccount(info: AccountInfoLike, baseUrl?: string): ChatAc
   return { billing: "none", label: "Not logged in", detail: "Sign in with your Claude account's email in Settings → Claude." };
 }
 
+/** What Settings → Claude has chosen, as describeSignIn reads it. */
+export interface SignInChoice {
+  mode: "login" | "proxy";
+  /** The address a proxy-mode launch goes through; null when none is set. */
+  proxyUrl: string | null;
+  /** `claude auth status` under the account sign-in; null in proxy mode. */
+  login: { loggedIn: boolean; method: string; email: string | null } | null;
+}
+
+/**
+ * The sign-in a new session would start under, before any session has
+ * reported one (specs/agents/agent-pane.feature.md "The pane header says
+ * whether the agent spends an account or the API"): the API through the
+ * proxy Settings names, or the Claude account Claude Code is signed in to.
+ * A session's own account answer (describeAccount) replaces it once it
+ * comes.
+ */
+export function describeSignIn(choice: SignInChoice): ChatAccount {
+  if (choice.mode === "proxy") {
+    let endpoint: URL | undefined;
+    try {
+      endpoint = choice.proxyUrl ? new URL(choice.proxyUrl) : undefined;
+    } catch {
+      // Settings normalizes the url; a bad one reads as none set.
+    }
+    if (!endpoint) {
+      return { billing: "api", label: "API", detail: "API · no address set yet — enter one in Settings → Claude" };
+    }
+    const label = LOCAL_HOSTS.test(endpoint.hostname) ? "PROXY" : endpoint.hostname;
+    return { billing: "api", label: `API:${label}`, detail: `API calls go to ${endpoint.host}` };
+  }
+  const login = choice.login;
+  if (login?.loggedIn) {
+    const who = login.email ? ` · ${login.email}` : "";
+    if (login.method === "oauth_token") {
+      return { billing: "plan", label: "Claude plan", detail: `Claude subscription token${who}` };
+    }
+    return { billing: "plan", label: "Claude account", detail: `Claude account${who}` };
+  }
+  return { billing: "none", label: "Not logged in", detail: "Sign in with your Claude account's email in Settings → Claude." };
+}
+
 // --- The SDK seam -----------------------------------------------------------
 
 /**
@@ -880,6 +922,9 @@ export interface ClaudeProviderOptions {
   /** Write a patch to the plugin's settings section (HostConfig.settings);
       default: nothing is kept. */
   saveSettings?: (patch: Record<string, unknown>) => Promise<void>;
+  /** The sign-in a new session would start under (describeSignIn), for
+      choices().account; default: none said. */
+  signIn?: () => Promise<ChatAccount>;
 }
 
 /** The pane's menu with nothing listed: Claude Code's aliases for its latest models. */
@@ -1017,7 +1062,8 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
       const models = narrowModels(all, await listedModels()).map((m) =>
         "description" in m && m.description === "" ? { value: m.value, displayName: m.displayName } : m,
       );
-      return { models, model: await defaultModel(own), effort: own.defaultEffort };
+      const account = await options.signIn?.().catch(() => undefined);
+      return { models, model: await defaultModel(own), effort: own.defaultEffort, ...(account ? { account } : {}) };
     },
     /** A pick in the pane becomes Settings → Claude's default. */
     async setDefaults(patch: AgentDefaultsPatch): Promise<void> {

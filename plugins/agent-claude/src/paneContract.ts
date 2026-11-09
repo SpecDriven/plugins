@@ -4,7 +4,7 @@
 // @specdriven/host so the plugin still type-checks against the older apps
 // it runs in — they lack these types and simply never call these methods.
 
-import type { AgentHost, AgentProvider, AgentStartOptions } from "@specdriven/host";
+import type { AgentHost, AgentProvider, AgentStartOptions, ChatAccount } from "@specdriven/host";
 import type { ClaudeEffort } from "./settings";
 
 export interface AgentModelOption {
@@ -19,6 +19,10 @@ export interface AgentChoices {
   models: AgentModelOption[];
   model: string | null;
   effort: ClaudeEffort | null;
+  /** The sign-in a new session would start under, for the pane header's
+      API / ACNT chip before any session has said (SpecDriven 0.1.249 and
+      later read it; an older app ignores it). */
+  account?: ChatAccount;
 }
 
 export interface AgentDefaultsPatch {
