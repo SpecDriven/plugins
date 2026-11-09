@@ -132,7 +132,7 @@ async function call(method, path, body) {
 }
 var MODE_HINT = {
   login: "Sessions use the Claude account Claude Code is signed in to. A proxy or API key in Claude Code's own settings is set aside for them.",
-  proxy: "Sessions send their API calls to the proxy below, with its token. That overrides whatever Claude Code's own settings say."
+  proxy: "Sessions send their API calls to the address below (an API proxy or gateway), with its token. That overrides whatever Claude Code's own settings say."
 };
 function claudeModelsOf(settings) {
   const all = settings.agentModels;
@@ -215,7 +215,7 @@ function ClaudeSettings({ models = null } = {}) {
               }),
               /* @__PURE__ */ jsx("option", {
                 value: "proxy",
-                children: "API proxy"
+                children: "API"
               })
             ]
           })
@@ -809,7 +809,7 @@ function ClaudeProxy({
     children: [
       /* @__PURE__ */ jsx("span", {
         className: "auth-title",
-        children: "API proxy"
+        children: "API"
       }),
       /* @__PURE__ */ jsxs("div", {
         className: "paste-token",
@@ -818,7 +818,7 @@ function ClaudeProxy({
             className: "auth-row",
             children: [
               /* @__PURE__ */ jsx("input", {
-                "aria-label": "Claude API proxy url",
+                "aria-label": "Claude API url",
                 className: "paste-token-host",
                 value: urlDraft,
                 onChange: (e) => setUrlDraft(e.target.value),
@@ -869,7 +869,7 @@ function ClaudeProxy({
             className: "auth-row",
             children: [
               /* @__PURE__ */ jsx("input", {
-                "aria-label": "Claude API proxy token",
+                "aria-label": "Claude API token",
                 type: "password",
                 autoComplete: "off",
                 value: token,
@@ -939,7 +939,7 @@ var plugin = {
     ctx.effect(() => settings.add({
       id: "claude",
       title: "Claude",
-      hint: "How the Claude the app starts signs in — your Claude account, or an API proxy with a token kept on this device — and the model it starts on.",
+      hint: "How the Claude the app starts signs in — your Claude account, or the API through a proxy with a token kept on this device — and the model it starts on.",
       order: CLAUDE_SETTINGS_ORDER,
       when: ({ demo, hosted }) => !demo && !hosted,
       Component: ClaudeSection
@@ -952,5 +952,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=EF95C296A20399E664756E2164756E21
+//# debugId=9C2ED7B01BEB188864756E2164756E21
 //# sourceMappingURL=client.js.map
