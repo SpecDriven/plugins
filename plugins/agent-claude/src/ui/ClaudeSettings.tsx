@@ -101,7 +101,7 @@ const MODE_HINT: Record<ClaudeAuthMode, string> = {
   login:
     "Sessions use the Claude account Claude Code is signed in to. A proxy or API key in Claude Code's own settings is set aside for them.",
   proxy:
-    "Sessions send their API calls to the proxy below, with its token. That overrides whatever Claude Code's own settings say.",
+    "Sessions send their API calls to the address below (an API proxy or gateway), with its token. That overrides whatever Claude Code's own settings say.",
 };
 
 /**
@@ -179,7 +179,7 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
         </span>
         <select value={info.mode} onChange={(e) => void pickMode(e.target.value as ClaudeAuthMode)}>
           <option value="login">Claude account (email login)</option>
-          <option value="proxy">API proxy</option>
+          <option value="proxy">API</option>
         </select>
       </label>
       {info.mode === "login" ? (
@@ -755,11 +755,11 @@ function ClaudeProxy({
 
   return (
     <div className="settings-row auth-section">
-      <span className="auth-title">API proxy</span>
+      <span className="auth-title">API</span>
       <div className="paste-token">
         <div className="auth-row">
           <input
-            aria-label="Claude API proxy url"
+            aria-label="Claude API url"
             className="paste-token-host"
             value={urlDraft}
             onChange={(e) => setUrlDraft(e.target.value)}
@@ -794,7 +794,7 @@ function ClaudeProxy({
         )}
         <div className="auth-row">
           <input
-            aria-label="Claude API proxy token"
+            aria-label="Claude API token"
             type="password"
             autoComplete="off"
             value={token}
