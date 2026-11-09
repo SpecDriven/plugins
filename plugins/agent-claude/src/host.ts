@@ -32,6 +32,7 @@ import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
 import { listedClaudeModels, withReportedModels } from "./models";
 import { createClaudeProvider, describeSignIn } from "./provider";
+import { withReconnect } from "./reconnect";
 import { ADOPTED_KEY, CLAUDE_LEGACY_KEYS, claudeSettingsOf, claudeSettingsPatch } from "./settings";
 import type { ClaudeSettingsValues } from "./settings";
 
@@ -115,7 +116,7 @@ const plugin: Plugin<Context, HostConfig> = {
 
     ctx.effect(() =>
       agents.register(
-        withReportedModels(createClaudeProvider({
+        withReconnect(withReportedModels(createClaudeProvider({
           settings,
           token: () => storedToken(secrets),
           listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
@@ -131,6 +132,9 @@ const plugin: Plugin<Context, HostConfig> = {
         }),
         // The app checks the data repo's list for Claude against these.
         () => offeredModels()),
+        // A folder switch, or the pane's Retry: check the proxy again. Its
+        // models may have changed meanwhile; the next menu asks it again.
+        { settings, token: () => storedToken(secrets), answered: () => forgetAccountModels() }),
       ),
     );
 
