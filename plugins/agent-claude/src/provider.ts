@@ -286,6 +286,23 @@ export function setClaudeFirstResponseSeconds(fn: (() => Promise<number>) | null
   return previous;
 }
 
+/** How many times the pane tries a turn's request on an API that stays
+    silent before it gives the turn up. */
+export const API_TRIES = 3;
+
+/** The pause before the pane's second try; each further one waits as much
+    again (2 seconds, then 4). */
+const RETRY_PAUSE_MS = 2000;
+
+// Injection seam for that pause: a test wants milliseconds; null restores it.
+let retryPauseMs: number | null = null;
+
+export function setClaudeRetryPauseMs(ms: number | null): number | null {
+  const previous = retryPauseMs;
+  retryPauseMs = ms;
+  return previous;
+}
+
 /** A user turn for Claude Code: the text, or, with pasted images, the
     images first and then the text (an empty text block is refused, so a
     message of images alone has none). */
@@ -503,8 +520,18 @@ class ClaudeSession implements AgentSession {
   firstResponseMs = 0;
   /** The armed first-response watchdog of the turn under way. */
   private firstResponse: ReturnType<typeof setTimeout> | null = null;
-  /** Retries Claude Code reported in that turn before anything came back. */
+  /** Retries Claude Code reported in the try under way before anything came back. */
   private apiRetries = 0;
+  /** What the turn under way sent, to send again when the API stays silent. */
+  lastMessage: SDKUserMessage | null = null;
+  /** Requests the turn's earlier tries made, and how often the pane sent
+      the message again. */
+  private triesBefore = 0;
+  private resends = 0;
+  /** A try the pane gave up on: its interrupt's result is awaited, then
+      kept through the pause before the next try. */
+  private retry: { pauseMs: number; result: SDKMessage | null; timer: ReturnType<typeof setTimeout> | null } | null =
+    null;
   /** Whether this Claude Code answers the context count: asked once, and
       a refusal then means the totals from each turn stand in for it. */
   private contextProbe: "unknown" | "yes" | "no" = "unknown";
@@ -551,12 +578,22 @@ class ClaudeSession implements AgentSession {
 
   async send(text: string, images?: PastedImage[]): Promise<void> {
     if (this.restarting) await this.restarting;
-    this.input.push(userMessage(text, images));
+    this.lastMessage = userMessage(text, images);
+    this.input.push(this.lastMessage);
     this.armFirstResponse();
   }
 
   async interrupt(): Promise<void> {
     this.disarmFirstResponse();
+    const retry = this.retry;
+    if (retry) {
+      // Stopped while the pane was trying again: no further try. The try
+      // it gave up on is interrupted already, and its result ends the turn —
+      // now, when it came before the pause, else when it comes.
+      this.dropRetry();
+      if (retry.result) this.handleMessage(retry.result);
+      return;
+    }
     await this.query?.interrupt();
   }
 
@@ -587,6 +624,7 @@ class ClaudeSession implements AgentSession {
 
   close(): void {
     this.disarmFirstResponse();
+    this.dropRetry();
     this.input.close();
     this.abort.abort();
   }
@@ -818,6 +856,15 @@ class ClaudeSession implements AgentSession {
       this.host.update({ commands: this.commands });
       return;
     }
+    if (this.retry && !this.retry.result) {
+      // The try the pane gave up on says nothing more; its result (Claude
+      // Code's answer to the interrupt) starts the pause before the next.
+      if (msg.type === "result") {
+        this.retry.result = msg;
+        this.retry.timer = setTimeout(() => this.tryAgain(), this.retry.pauseMs);
+      }
+      return;
+    }
     if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
       const tokens = tokensInWindow(msg.message.usage);
       if (tokens !== null && tokens > 0) this.lastWindowTokens = tokens;
@@ -849,13 +896,25 @@ class ClaudeSession implements AgentSession {
   //
   // With the API behind a proxy (ANTHROPIC_BASE_URL) that is not running,
   // Claude Code retries its first request ten times with growing back-off —
-  // minutes of a spinner. The pane gives a turn firstResponseMs to show any
-  // sign of the API instead: a streamed event (the API's `ping` keepalives
-  // included), a finished message or a result. None by then, and the turn
-  // is stopped with a note saying why; the session stays up for the next
-  // try.
+  // minutes of a spinner — and a proxy that takes the request and never
+  // answers is not retried at all. The pane gives each try firstResponseMs
+  // to show any sign of the API instead: a streamed event (the API's `ping`
+  // keepalives included), a finished message or a result. None by then, and
+  // the try is stopped; the pane sends the message again after a pause until
+  // the API has been asked API_TRIES times, Claude Code's own retries
+  // counted. Still nothing, and the turn is stopped with a note saying why;
+  // the session stays up for the next message.
 
+  /** A new turn: the wait starts, and the tries count from one. */
   armFirstResponse(): void {
+    this.dropRetry();
+    this.triesBefore = 0;
+    this.resends = 0;
+    this.armWait();
+  }
+
+  /** One try's wait. */
+  private armWait(): void {
     this.disarmFirstResponse();
     this.apiRetries = 0;
     if (!this.firstResponseMs || !this.apiBaseUrl) return;
@@ -865,6 +924,11 @@ class ClaudeSession implements AgentSession {
   private disarmFirstResponse(): void {
     if (this.firstResponse) clearTimeout(this.firstResponse);
     this.firstResponse = null;
+  }
+
+  private dropRetry(): void {
+    if (this.retry?.timer) clearTimeout(this.retry.timer);
+    this.retry = null;
   }
 
   /** Anything the API sent ends the wait; Claude Code's own retries do not. */
@@ -883,21 +947,44 @@ class ClaudeSession implements AgentSession {
     this.firstResponse = null;
     if (this.final || !this.host.busy() || !this.query) return;
     const seconds = Math.round(this.firstResponseMs / 1000);
-    const retries =
-      this.apiRetries > 0 ? ` after ${this.apiRetries} ${this.apiRetries === 1 ? "retry" : "retries"}` : "";
-    this.host.note(
-      "error",
-      "api",
-      `No response from the API at ${this.apiBaseUrl} within ${seconds}s${retries} — is the proxy running? ` +
-        "The turn was stopped; send it again once the proxy is up. (Settings → Workflow sets this wait.)",
-    );
+    // Each retry Claude Code reported is a request that failed; with none
+    // reported, the one request is still unanswered.
+    const tries = this.triesBefore + Math.max(1, this.apiRetries);
+    const silent = `No response from the API at ${this.apiBaseUrl} within ${seconds}s`;
+    if (this.lastMessage && tries < API_TRIES) {
+      this.triesBefore = tries;
+      this.resends += 1;
+      const pauseMs = (retryPauseMs ?? RETRY_PAUSE_MS) * this.resends;
+      this.retry = { pauseMs, result: null, timer: null };
+      this.host.note(
+        "info",
+        "api",
+        `${silent} — trying again in ${Math.round(pauseMs / 1000)}s (try ${tries + 1} of ${API_TRIES}).`,
+      );
+    } else {
+      this.host.note(
+        "error",
+        "api",
+        `${silent}, after ${tries} ${tries === 1 ? "try" : "tries"} — is the proxy running? ` +
+          "The turn was stopped; send it again once the proxy is up. (Settings → Claude sets this wait.)",
+      );
+    }
     // Claude Code answers the interrupt with the turn's result, which puts
-    // the session back to idle.
+    // the session back to idle — or, with another try to come, starts the
+    // pause before it (handleMessage).
     try {
       await this.query.interrupt();
     } catch {
       // A Claude Code that died meanwhile ends the session through pump.
     }
+  }
+
+  /** The pause is over: the same message again, with a wait of its own. */
+  private tryAgain(): void {
+    this.retry = null;
+    if (this.final || !this.host.busy() || !this.lastMessage) return;
+    this.input.push(this.lastMessage);
+    this.armWait();
   }
 }
 
@@ -1027,7 +1114,10 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
       session.effort = opts.effort ?? (await settings()).defaultEffort;
-      if (opts.prompt || opts.images?.length) session.input.push(userMessage(opts.prompt ?? "", opts.images));
+      if (opts.prompt || opts.images?.length) {
+        session.lastMessage = userMessage(opts.prompt ?? "", opts.images);
+        session.input.push(session.lastMessage);
+      }
       try {
         const run = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
         session.query = run.query;
