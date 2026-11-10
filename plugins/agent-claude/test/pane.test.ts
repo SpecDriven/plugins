@@ -27,6 +27,7 @@ import {
   mapSdkMessage,
   mcpServerConfigs,
   setClaudeFirstResponseSeconds,
+  setClaudeRetryPauseMs,
   setQueryFactory,
 } from "../src/provider";
 import type { AccountInfoLike, QueryLike } from "../src/provider";
@@ -158,6 +159,7 @@ afterEach(async () => {
   setClaudeAvailability(null);
   setQueryFactory(null);
   setClaudeFirstResponseSeconds(null);
+  setClaudeRetryPauseMs(null);
   setSecretBackend("agent-claude.token", null);
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
@@ -1040,9 +1042,11 @@ test("a Claude turn behind a proxy that does not answer is stopped after the wai
   process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
   const { id, fake } = await watchedSession(0.05);
   await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" });
-  // Claude Code's own retries are no answer from the API.
+  // Claude Code's own retries are no answer from the API — and three of
+  // them are three requests that failed, so the pane sends nothing again.
   fake.emit(apiRetry(1));
   fake.emit(apiRetry(2));
+  fake.emit(apiRetry(3));
   const snap = await until(
     () => snapshot(id),
     (s) => s.events.some((e) => e.kind === "note" && e.level === "error"),
@@ -1051,12 +1055,149 @@ test("a Claude turn behind a proxy that does not answer is stopped after the wai
   const note = snap.events.find((e) => e.kind === "note" && e.level === "error");
   expect(note).toMatchObject({ code: "api" });
   expect(note && "text" in note ? note.text : "").toContain(
-    "No response from the API at http://127.0.0.1:9 within 0s after 2 retries",
+    "No response from the API at http://127.0.0.1:9 within 0s, after 3 tries",
   );
+  expect(fake.inputs.length).toBe(1);
   // Claude Code answers the interrupt with the turn's result; the session
   // stays up for the next try.
   fake.emit(result({ subtype: "error_during_execution", is_error: true, errors: [] }));
   await untilStatus(id, "idle");
+});
+
+/** Claude Code's answer to an interrupt: the stopped turn's result. */
+const stoppedTurn = () => result({ subtype: "error_during_execution", is_error: true, errors: [] });
+
+const notes = (snap: Awaited<ReturnType<typeof snapshot>>, level: string) =>
+  snap.events.filter((e) => e.kind === "note" && e.level === level && e.code === "api").map((e) => ("text" in e ? e.text : ""));
+
+test("a Claude turn whose request the proxy leaves unanswered is sent again, three tries in all", async () => {
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  setClaudeRetryPauseMs(20);
+  const { id, fake } = await watchedSession(0.05);
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" });
+  const first = await fake.input(1);
+
+  // The first try: stopped after the wait, and said so — not as an error.
+  await until(async () => fake.interrupts, (n) => n === 1);
+  expect(notes(await snapshot(id), "info").at(-1)).toContain(
+    "No response from the API at http://127.0.0.1:9 within 0s — trying again in 0s (try 2 of 3)",
+  );
+  fake.emit(stoppedTurn());
+  // The same message again after the pause; the turn is still the one turn.
+  expect(await fake.input(2)).toBe(first);
+  expect((await snapshot(id)).meta.status).toBe("running");
+
+  await until(async () => fake.interrupts, (n) => n === 2);
+  expect(notes(await snapshot(id), "info").at(-1)).toContain("(try 3 of 3)");
+  fake.emit(stoppedTurn());
+  expect(await fake.input(3)).toBe(first);
+
+  // The third try stays silent too: now the turn is stopped, with the error.
+  await until(async () => fake.interrupts, (n) => n === 3);
+  const failed = await until(() => snapshot(id), (s) => notes(s, "error").length > 0);
+  expect(notes(failed, "error")).toEqual([
+    "No response from the API at http://127.0.0.1:9 within 0s, after 3 tries — is the proxy running? " +
+      "The turn was stopped; send it again once the proxy is up. (Settings → Claude sets this wait.)",
+  ]);
+  expect(failed.events.some((e) => e.kind === "result")).toBe(false);
+  fake.emit(stoppedTurn());
+  const snap = await untilStatus(id, "idle");
+  // Only the last try's result reaches the pane; nothing is sent a fourth time.
+  expect(snap.events.filter((e) => e.kind === "result").length).toBe(1);
+  await Bun.sleep(120);
+  expect(fake.inputs.length).toBe(3);
+  expect(fake.interrupts).toBe(3);
+});
+
+test("a Claude turn whose second try gets an answer runs on", async () => {
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  setClaudeRetryPauseMs(20);
+  const { id, fake } = await watchedSession(0.05);
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" });
+  await until(async () => fake.interrupts, (n) => n === 1);
+  // What the stopped try still says is not shown.
+  fake.emit(assistant("msg-late", [{ type: "text", text: "too late" }]));
+  fake.emit(stoppedTurn());
+  await fake.input(2);
+  fake.emit(
+    sdk({ type: "stream_event", event: { type: "ping" }, parent_tool_use_id: null, uuid: "u-p", session_id: "claude-1" }),
+  );
+  await Bun.sleep(120);
+  expect(fake.interrupts).toBe(1);
+  fake.emit(result());
+  const snap = await untilStatus(id, "idle");
+  expect(notes(snap, "error")).toEqual([]);
+  expect(snap.events.filter((e) => e.kind === "result")).toMatchObject([{ subtype: "success" }]);
+  expect(snap.events.some((e) => e.kind === "assistant")).toBe(false);
+  expect(fake.inputs.length).toBe(2);
+});
+
+test("Claude Code's own retries count toward the three tries", async () => {
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  setClaudeRetryPauseMs(20);
+  const { id, fake } = await watchedSession(0.05);
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" });
+  // Two requests failed before the wait ran out: one more try is left.
+  fake.emit(apiRetry(1));
+  fake.emit(apiRetry(2));
+  await until(async () => fake.interrupts, (n) => n === 1);
+  expect(notes(await snapshot(id), "info").at(-1)).toContain("(try 3 of 3)");
+  fake.emit(stoppedTurn());
+  await fake.input(2);
+  await until(async () => fake.interrupts, (n) => n === 2);
+  const snap = await until(() => snapshot(id), (s) => notes(s, "error").length > 0);
+  expect(notes(snap, "error")[0]).toContain("within 0s, after 3 tries");
+  fake.emit(stoppedTurn());
+  await untilStatus(id, "idle");
+  expect(fake.inputs.length).toBe(2);
+});
+
+test("Stop while the pane waits to try again ends the turn, with nothing sent again", async () => {
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  setClaudeRetryPauseMs(150);
+  const { id, fake } = await watchedSession(0.05);
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" });
+  await until(async () => fake.interrupts, (n) => n === 1);
+  fake.emit(stoppedTurn());
+  await Bun.sleep(30);
+  // In the pause between tries Claude Code has no turn to interrupt: the
+  // stopped try's result ends the turn.
+  expect((await api(`/api/agent/chat/${id}/interrupt`, "POST")).status).toBe(200);
+  const snap = await untilStatus(id, "idle");
+  expect(snap.events.filter((e) => e.kind === "result").length).toBe(1);
+  expect(fake.interrupts).toBe(1);
+  await Bun.sleep(250);
+  expect(fake.inputs.length).toBe(1);
+
+  // Stopped before Claude Code answered the pane's interrupt: that answer
+  // ends the turn when it comes.
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "again" });
+  await until(async () => fake.interrupts, (n) => n === 2);
+  expect((await api(`/api/agent/chat/${id}/interrupt`, "POST")).status).toBe(200);
+  expect((await snapshot(id)).meta.status).toBe("running");
+  fake.emit(stoppedTurn());
+  await untilStatus(id, "idle");
+  await Bun.sleep(250);
+  expect(fake.inputs.length).toBe(2);
+  expect(fake.interrupts).toBe(2);
+});
+
+test("a prompt a session starts with is tried again the same way", async () => {
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  setClaudeFirstResponseSeconds(async () => 0.05);
+  setClaudeRetryPauseMs(20);
+  await createChatSession({
+    place: { dataRepo: data },
+    name: "chat",
+    agent: "claude",
+    prompt: "explain",
+    sessionsDir: join(root, ".specdriven", "sessions"),
+  });
+  const fake = fakes.at(-1)!;
+  const first = await fake.input(1);
+  await until(async () => fake.interrupts, (n) => n === 1);
+  fake.emit(stoppedTurn());
+  expect(await fake.input(2)).toBe(first);
 });
 
 test("a Claude turn whose API answers in time is left to run", async () => {

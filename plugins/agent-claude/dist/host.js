@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// ../plugins-api-retries/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// src/host.ts
+// ../plugins-api-retries/plugins/agent-claude/src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44571,20 +44571,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// src/auth.ts
+// ../plugins-api-retries/plugins/agent-claude/src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// src/binary.ts
+// ../plugins-api-retries/plugins/agent-claude/src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// src/binaries.json
+// ../plugins-api-retries/plugins/agent-claude/src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44599,7 +44599,7 @@ var binaries_default = {
   }
 };
 
-// src/binary.ts
+// ../plugins-api-retries/plugins/agent-claude/src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44727,7 +44727,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// src/cli.ts
+// ../plugins-api-retries/plugins/agent-claude/src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44739,7 +44739,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// src/settings.ts
+// ../plugins-api-retries/plugins/agent-claude/src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44850,7 +44850,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// src/auth.ts
+// ../plugins-api-retries/plugins/agent-claude/src/auth.ts
 var log = getLogger("agent-claude");
 
 class ClaudeAuthError extends Error {
@@ -45208,7 +45208,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// src/modelMenu.ts
+// ../plugins-api-retries/plugins/agent-claude/src/modelMenu.ts
 function narrowModels(all, listed) {
   if (listed.length === 0)
     return [...all];
@@ -45225,7 +45225,7 @@ function inList(model, all, listed) {
   return narrowModels(all, listed).some((m2) => m2.value === model || m2.resolvedModel === model);
 }
 
-// src/contextUsage.ts
+// ../plugins-api-retries/plugins/agent-claude/src/contextUsage.ts
 var KINDS = new Set(["used", "buffer", "free", "deferred"]);
 function categoryId(category) {
   if (category.id)
@@ -45302,7 +45302,7 @@ function contextWindowOf(modelUsage, model) {
   return sizes.length ? Math.max(...sizes) : null;
 }
 
-// src/provider.ts
+// ../plugins-api-retries/plugins/agent-claude/src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45420,6 +45420,9 @@ function currentQueryFactory() {
   return queryFactory ?? sdkFactory;
 }
 var firstResponseReader = null;
+var API_TRIES = 3;
+var RETRY_PAUSE_MS = 2000;
+var retryPauseMs = null;
 function userMessage(text, images = []) {
   if (images.length === 0) {
     return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
@@ -45586,6 +45589,10 @@ class ClaudeSession {
   firstResponseMs = 0;
   firstResponse = null;
   apiRetries = 0;
+  lastMessage = null;
+  triesBefore = 0;
+  resends = 0;
+  retry = null;
   contextProbe = "unknown";
   contextTicket = 0;
   lastWindowTokens = null;
@@ -45622,11 +45629,19 @@ class ClaudeSession {
   async send(text, images) {
     if (this.restarting)
       await this.restarting;
-    this.input.push(userMessage(text, images));
+    this.lastMessage = userMessage(text, images);
+    this.input.push(this.lastMessage);
     this.armFirstResponse();
   }
   async interrupt() {
     this.disarmFirstResponse();
+    const retry = this.retry;
+    if (retry) {
+      this.dropRetry();
+      if (retry.result)
+        this.handleMessage(retry.result);
+      return;
+    }
     await this.query?.interrupt();
   }
   async setPermissionMode(mode) {
@@ -45656,6 +45671,7 @@ class ClaudeSession {
   }
   close() {
     this.disarmFirstResponse();
+    this.dropRetry();
     this.input.close();
     this.abort.abort();
   }
@@ -45846,6 +45862,13 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
       this.host.update({ commands: this.commands });
       return;
     }
+    if (this.retry && !this.retry.result) {
+      if (msg.type === "result") {
+        this.retry.result = msg;
+        this.retry.timer = setTimeout(() => this.tryAgain(), this.retry.pauseMs);
+      }
+      return;
+    }
     if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
       const tokens = tokensInWindow(msg.message.usage);
       if (tokens !== null && tokens > 0)
@@ -45872,6 +45895,12 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
     } catch {}
   }
   armFirstResponse() {
+    this.dropRetry();
+    this.triesBefore = 0;
+    this.resends = 0;
+    this.armWait();
+  }
+  armWait() {
     this.disarmFirstResponse();
     this.apiRetries = 0;
     if (!this.firstResponseMs || !this.apiBaseUrl)
@@ -45882,6 +45911,11 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
     if (this.firstResponse)
       clearTimeout(this.firstResponse);
     this.firstResponse = null;
+  }
+  dropRetry() {
+    if (this.retry?.timer)
+      clearTimeout(this.retry.timer);
+    this.retry = null;
   }
   noteFirstResponse(msg) {
     if (!this.firstResponse)
@@ -45899,11 +45933,27 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
     if (this.final || !this.host.busy() || !this.query)
       return;
     const seconds = Math.round(this.firstResponseMs / 1000);
-    const retries = this.apiRetries > 0 ? ` after ${this.apiRetries} ${this.apiRetries === 1 ? "retry" : "retries"}` : "";
-    this.host.note("error", "api", `No response from the API at ${this.apiBaseUrl} within ${seconds}s${retries} — is the proxy running? ` + "The turn was stopped; send it again once the proxy is up. (Settings → Workflow sets this wait.)");
+    const tries = this.triesBefore + Math.max(1, this.apiRetries);
+    const silent = `No response from the API at ${this.apiBaseUrl} within ${seconds}s`;
+    if (this.lastMessage && tries < API_TRIES) {
+      this.triesBefore = tries;
+      this.resends += 1;
+      const pauseMs = (retryPauseMs ?? RETRY_PAUSE_MS) * this.resends;
+      this.retry = { pauseMs, result: null, timer: null };
+      this.host.note("info", "api", `${silent} — trying again in ${Math.round(pauseMs / 1000)}s (try ${tries + 1} of ${API_TRIES}).`);
+    } else {
+      this.host.note("error", "api", `${silent}, after ${tries} ${tries === 1 ? "try" : "tries"} — is the proxy running? ` + "The turn was stopped; send it again once the proxy is up. (Settings → Claude sets this wait.)");
+    }
     try {
       await this.query.interrupt();
     } catch {}
+  }
+  tryAgain() {
+    this.retry = null;
+    if (this.final || !this.host.busy() || !this.lastMessage)
+      return;
+    this.input.push(this.lastMessage);
+    this.armWait();
   }
 }
 var ALIAS_MENU = CLAUDE_MODEL_ALIASES.filter((a) => a !== "opusplan").map((a) => ({
@@ -45985,8 +46035,10 @@ function createClaudeProvider(options = {}) {
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
       session.effort = opts.effort ?? (await settings()).defaultEffort;
-      if (opts.prompt || opts.images?.length)
-        session.input.push(userMessage(opts.prompt ?? "", opts.images));
+      if (opts.prompt || opts.images?.length) {
+        session.lastMessage = userMessage(opts.prompt ?? "", opts.images);
+        session.input.push(session.lastMessage);
+      }
       try {
         const run2 = await session.launch({ input: session.input, abort: session.abort, permissionMode: opts.permissionMode });
         session.query = run2.query;
@@ -46080,7 +46132,7 @@ function mcpServerConfigs(servers) {
   return Object.fromEntries(servers.map((s) => [s.name, { type: "stdio", command: s.command, args: [...s.args], env: { ...s.env } }]));
 }
 
-// src/accountModels.ts
+// ../plugins-api-retries/plugins/agent-claude/src/accountModels.ts
 function effortsOf(row) {
   if (row.supportsEffort === false)
     return [];
@@ -46181,7 +46233,7 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// src/proxyModels.ts
+// ../plugins-api-retries/plugins/agent-claude/src/proxyModels.ts
 var PROXY_MODELS_TIMEOUT_MS = 1e4;
 var MAX_PROXY_MODELS = 200;
 function proxyModelsOf(rows, into = []) {
@@ -46232,7 +46284,7 @@ async function fetchProxyModels(url, token, fetchFn = fetch, timeoutMs = PROXY_M
   return models;
 }
 
-// src/models.ts
+// ../plugins-api-retries/plugins/agent-claude/src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var CLAUDE_MODELS_FILE = ".specdriven/claude-models.json";
@@ -46276,7 +46328,7 @@ function withReportedModels(provider, offered) {
   });
 }
 
-// src/reconnect.ts
+// ../plugins-api-retries/plugins/agent-claude/src/reconnect.ts
 var RECONNECT_TRIES = 3;
 var RECONNECT_PAUSE_MS = 1000;
 async function reconnectProxy(cwd, deps) {
@@ -46317,7 +46369,7 @@ function withReconnect(provider, deps) {
   });
 }
 
-// src/host.ts
+// ../plugins-api-retries/plugins/agent-claude/src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var SIGN_IN_TTL_MS = 30000;
 var TOKEN_STORE = "token";
@@ -46557,5 +46609,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=69EF4C9184EC4CA664756E2164756E21
+//# debugId=F5866153E47ECCFE64756E2164756E21
 //# sourceMappingURL=host.js.map
