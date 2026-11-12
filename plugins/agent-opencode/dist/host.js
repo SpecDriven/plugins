@@ -333,6 +333,7 @@ function newAcpStream() {
   return {
     message: null,
     messages: 0,
+    pieces: new Map,
     tools: new Map,
     turnStartedAt: null,
     cost: 0,
@@ -357,15 +358,35 @@ function flushMessage(ctx, stream) {
   ];
 }
 function showTool(id, tool, ctx) {
-  if (tool.shown)
-    return [];
-  tool.shown = true;
   const pane = paneTool(tool);
+  const key = JSON.stringify(pane);
+  if (tool.shown === key)
+    return [];
+  tool.shown = key;
   const block = { type: "tool_use", id, name: pane.name, input: pane.input };
   return [{ kind: "assistant", messageId: `tool-${id}`, turn: ctx.turn, blocks: [block], parentToolUseId: null }];
 }
-function hasInput(input) {
-  return Object.keys(input).length > 0;
+function mergeTool(update, stream) {
+  const id = text(update.toolCallId);
+  if (!id)
+    return null;
+  let tool = stream.tools.get(id);
+  if (!tool) {
+    tool = { kind: null, name: null, title: null, rawInput: {}, locations: null, shown: null };
+    stream.tools.set(id, tool);
+  }
+  if (update.kind !== undefined)
+    tool.kind = update.kind;
+  if (update.name !== undefined)
+    tool.name = update.name;
+  if (update.title !== undefined)
+    tool.title = update.title;
+  if (Array.isArray(update.locations) && update.locations.length > 0)
+    tool.locations = update.locations;
+  const input = record(update.rawInput);
+  if (input && Object.keys(input).length > 0)
+    tool.rawInput = input;
+  return { id, tool };
 }
 function mapAcpUpdate(update, ctx, stream) {
   switch (update.sessionUpdate) {
@@ -376,11 +397,14 @@ function mapAcpUpdate(update, ctx, stream) {
         return [];
       const id = text(update.messageId);
       const events = [];
-      if (stream.message && id && stream.message.id !== id)
+      if (stream.message && id && stream.message.source !== id)
         events.push(...flushMessage(ctx, stream));
       if (!stream.message) {
         stream.messages += 1;
-        stream.message = { id: id ?? `opencode-${stream.messages}`, text: "" };
+        const source = id ?? `opencode-${stream.messages}`;
+        const piece = (stream.pieces.get(source) ?? 0) + 1;
+        stream.pieces.set(source, piece);
+        stream.message = { id: piece === 1 ? source : `${source}#${piece}`, source, text: "" };
       }
       stream.message.text += chunk;
       events.push({ kind: "text_delta", messageId: stream.message.id, index: 0, text: chunk });
@@ -388,29 +412,14 @@ function mapAcpUpdate(update, ctx, stream) {
     }
     case "tool_call":
     case "tool_call_update": {
-      const id = text(update.toolCallId);
-      if (!id)
+      const merged = mergeTool(update, stream);
+      if (!merged)
         return [];
+      const { id, tool } = merged;
       const events = flushMessage(ctx, stream);
-      let tool = stream.tools.get(id);
-      if (!tool) {
-        tool = { kind: null, name: null, title: null, rawInput: {}, locations: null, shown: false };
-        stream.tools.set(id, tool);
-      }
-      if (update.kind !== undefined)
-        tool.kind = update.kind;
-      if (update.name !== undefined)
-        tool.name = update.name;
-      if (update.title !== undefined)
-        tool.title = update.title;
-      if (Array.isArray(update.locations) && update.locations.length > 0)
-        tool.locations = update.locations;
-      const input = record(update.rawInput);
-      if (input && hasInput(input))
-        tool.rawInput = input;
-      const status = text(update.status);
+      const status = text(update.status) ?? (update.sessionUpdate === "tool_call" ? "pending" : null);
       const finished = status === "completed" || status === "failed";
-      if (hasInput(tool.rawInput) || finished)
+      if (status === "in_progress" || finished || tool.shown !== null)
         events.push(...showTool(id, tool, ctx));
       if (finished) {
         stream.tools.delete(id);
@@ -429,10 +438,10 @@ function mapAcpUpdate(update, ctx, stream) {
   }
 }
 function showToolForPermission(toolCall, ctx, stream) {
-  const id = text(toolCall.toolCallId);
-  if (!id)
+  const merged = mergeTool(toolCall, stream);
+  if (!merged)
     return [];
-  return mapAcpUpdate({ ...toolCall, sessionUpdate: "tool_call_update", status: "pending" }, ctx, stream);
+  return [...flushMessage(ctx, stream), ...showTool(merged.id, merged.tool, ctx)];
 }
 function acpUsage(update, stream) {
   const cost = record(update.cost);
@@ -456,6 +465,7 @@ function finishAcpTurn(outcome, ctx, stream) {
     events.push({ kind: "tool_result", toolUseId: id, content: "Stopped", isError: true, parentToolUseId: null });
   }
   stream.tools.clear();
+  stream.pieces.clear();
   const errors = [...stream.errors];
   let subtype = "success";
   if ("error" in outcome) {
@@ -496,51 +506,134 @@ function finishAcpTurn(outcome, ctx, stream) {
 }
 
 // src/cli.ts
+import { accessSync, constants } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 var OPENCODE_BIN = "opencode";
+function installerPath(home = homedir()) {
+  return join(home, ".opencode", "bin", process.platform === "win32" ? "opencode.exe" : OPENCODE_BIN);
+}
+function findOpencode(home = homedir()) {
+  const onPath = which(OPENCODE_BIN);
+  if (onPath)
+    return onPath;
+  const installed = installerPath(home);
+  try {
+    accessSync(installed, constants.X_OK);
+    return installed;
+  } catch {
+    return null;
+  }
+}
 var probe = null;
 function opencodeAvailable() {
-  return probe ? probe() : which(OPENCODE_BIN) !== null;
+  return probe ? probe() : findOpencode() !== null;
 }
 function opencodePath() {
-  return which(OPENCODE_BIN) ?? OPENCODE_BIN;
+  return findOpencode() ?? OPENCODE_BIN;
 }
 
 // src/config.ts
-var ASKED_PERMISSIONS = ["edit", "bash", "webfetch"];
-function sessionConfigContent(existing) {
+var ASKED = [
+  { key: "edit", action: "edit" },
+  { key: "bash", action: "shell" },
+  { key: "webfetch", action: "webfetch" }
+];
+function parseResolvedAgents(stdout) {
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed))
+    return null;
+  const agents2 = [];
+  for (const entry of parsed) {
+    const a = entry;
+    if (!a || typeof a.id !== "string" || !Array.isArray(a.permissions))
+      continue;
+    const rules = [];
+    for (const rule of a.permissions) {
+      const r = rule;
+      if (r && typeof r.action === "string" && typeof r.resource === "string" && typeof r.effect === "string") {
+        rules.push({ action: r.action, resource: r.resource, effect: r.effect });
+      }
+    }
+    agents2.push({ id: a.id, rules });
+  }
+  return agents2.length > 0 ? agents2 : null;
+}
+var readWithCli = async (cwd, env) => {
+  const res = await run(opencodePath(), ["debug", "agents", "--standalone"], { cwd, env });
+  return res.exitCode === 0 ? parseResolvedAgents(res.stdout) : null;
+};
+var reader = null;
+function resolvedAgents(cwd, env = process.env) {
+  return (reader ?? readWithCli)(cwd, env).catch(() => null);
+}
+function askingRules(rules, action) {
+  const out = { "*": "ask" };
+  for (const rule of rules) {
+    if (rule.action !== action && rule.action !== "*")
+      continue;
+    delete out[rule.resource];
+    out[rule.resource] = rule.effect === "allow" ? "ask" : rule.effect;
+  }
+  return out;
+}
+function object(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
+}
+function sessionConfigContent(existing, agents2 = null) {
   let base = {};
   if (existing?.trim()) {
     try {
-      const parsed = JSON.parse(existing);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-        base = parsed;
+      base = object(JSON.parse(existing));
     } catch {}
   }
-  const own = base.permission;
-  const permission = own && typeof own === "object" && !Array.isArray(own) ? { ...own } : {};
-  for (const key of ASKED_PERMISSIONS) {
+  const permission = object(base.permission);
+  for (const { key } of ASKED) {
     if (permission[key] !== "deny")
       permission[key] = "ask";
   }
-  return JSON.stringify({ ...base, permission });
+  const config = { ...base, permission };
+  if (agents2) {
+    const agent = object(base.agent);
+    for (const { id, rules } of agents2) {
+      const own = object(agent[id]);
+      const ownPermission = object(own.permission);
+      for (const { key, action } of ASKED)
+        ownPermission[key] = askingRules(rules, action);
+      agent[id] = { ...own, permission: ownPermission };
+    }
+    config.agent = agent;
+  }
+  return JSON.stringify(config);
 }
-function sessionEnv(env = process.env) {
-  return { ...env, OPENCODE_CONFIG_CONTENT: sessionConfigContent(env.OPENCODE_CONFIG_CONTENT) };
+async function sessionEnv(cwd, env = process.env) {
+  const agents2 = await resolvedAgents(cwd, env);
+  return { ...env, OPENCODE_CONFIG_CONTENT: sessionConfigContent(env.OPENCODE_CONFIG_CONTENT, agents2) };
 }
 
 // src/models.ts
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
 var OPENCODE_MODELS_FILE = ".specdriven/opencode-models.json";
 var MENU_SIZE = 20;
 var CATALOG_TTL_MS = 60000;
-var listWithCli = async () => {
-  const res = await run(opencodePath(), ["models"], { cwd: homedir() });
-  if (res.exitCode !== 0)
-    return [];
-  return res.stdout.split(`
+function parseModels(stdout) {
+  return stdout.split(`
 `).map((line) => line.trim()).filter((line) => /^[^\s/]+\/\S+$/.test(line));
+}
+var listWithCli = async () => {
+  const bin = opencodePath();
+  const alone = await run(bin, ["models", "--standalone"], { cwd: homedir2() });
+  if (alone.exitCode === 0)
+    return parseModels(alone.stdout);
+  const res = await run(bin, ["models"], { cwd: homedir2() });
+  return res.exitCode === 0 ? parseModels(res.stdout) : [];
 };
 var lister = null;
 var cached = null;
@@ -553,13 +646,13 @@ async function opencodeModels() {
   return models;
 }
 function opencodeStateDir(env = process.env) {
-  const base = env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
-  return join(base, "opencode");
+  const base = env.XDG_STATE_HOME?.trim() || join2(homedir2(), ".local", "state");
+  return join2(base, "opencode");
 }
 async function recentModels(stateDir = opencodeStateDir()) {
   let parsed;
   try {
-    parsed = JSON.parse(await readFile(join(stateDir, "model.json"), "utf8"));
+    parsed = JSON.parse(await readFile(join2(stateDir, "model.json"), "utf8"));
   } catch {
     return [];
   }
@@ -579,7 +672,7 @@ async function listedModels(dataDir) {
     return [];
   let list;
   try {
-    list = JSON.parse(await readFile(join(dataDir, OPENCODE_MODELS_FILE), "utf8"));
+    list = JSON.parse(await readFile(join2(dataDir, OPENCODE_MODELS_FILE), "utf8"));
   } catch {
     return [];
   }
@@ -610,8 +703,8 @@ function modelMenu(input) {
 
 // src/oneShot.ts
 var STDERR_TAIL = 5;
-function runArgs(message, model) {
-  return ["run", "--format", "json", "--agent", "plan", "--archived", ...model ? ["-m", model] : [], message];
+function runArgs(model) {
+  return ["run", "--standalone", "--format", "json", "--agent", "plan", "--archived", ...model ? ["-m", model] : []];
 }
 function oneShotMessage(req) {
   const parts = [req.systemPrompt, req.prompt];
@@ -676,7 +769,7 @@ async function opencodeOneShot(req) {
     };
     const child = opencodeSpawner()({
       bin: opencodePath(),
-      args: runArgs(oneShotMessage(req), req.model),
+      args: runArgs(req.model),
       cwd: req.cwd,
       env: process.env,
       onStdout: readStdout,
@@ -703,6 +796,7 @@ ${tail}` : ""}`, isError: true });
       }
     });
     proc = child;
+    child.write(oneShotMessage(req));
     child.end();
     if (settled)
       return;
@@ -732,14 +826,11 @@ function acpMcpServer(server) {
     env: Object.entries(server.env).map(([name, value]) => ({ name, value }))
   };
 }
-function sessionRule(toolName, ruleContent) {
-  return {
-    type: "addRules",
-    rules: [{ toolName, ...ruleContent ? { ruleContent } : {} }],
-    behavior: "allow",
-    destination: "session"
-  };
+function opencodeRule(toolName) {
+  return { type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "opencode" };
 }
+var EDIT_KINDS = new Set(["edit", "delete", "move"]);
+var DENIED_DEFAULT = "Denied in SpecDriven";
 function optionOf(options, kind) {
   if (!Array.isArray(options))
     return null;
@@ -764,9 +855,6 @@ function cardTitle(kind, toolName) {
       return `OpenCode wants to use ${toolName}`;
   }
 }
-function ruleContent(input) {
-  return str(input.command) ?? str(input.file_path) ?? str(input.url) ?? str(input.pattern) ?? "";
-}
 
 class OpencodeSession {
   host;
@@ -779,7 +867,8 @@ class OpencodeSession {
   config = { model: null, effort: null, mode: null };
   ownModel = null;
   mode;
-  inFlight = 0;
+  refusal = null;
+  stopped = false;
   commands = null;
   isReady = false;
   lastCount = null;
@@ -910,14 +999,22 @@ ${tail}` : `Could not start OpenCode: ${why}`, "spawn_failed");
       prompt.push({ type: "text", text: "" });
     this.host.turnStarted();
     startAcpTurn(this.stream);
-    this.inFlight += 1;
+    this.refusal = null;
+    this.stopped = false;
+    this.prompt(prompt);
+  }
+  prompt(prompt) {
     this.client.request("session/prompt", { sessionId: this.sessionId, prompt }, 0).then((res) => {
-      this.inFlight = Math.max(0, this.inFlight - 1);
       if (this.final)
         return;
-      if (this.inFlight > 0 && res.ok)
+      const stopReason = res.ok ? str(res.result.stopReason) ?? "end_turn" : null;
+      const refusal = this.refusal;
+      this.refusal = null;
+      if (stopReason === "cancelled" && refusal && !this.stopped) {
+        this.prompt([{ type: "text", text: `The user declined that, saying: ${refusal}` }]);
         return;
-      const outcome = res.ok ? { stopReason: str(res.result.stopReason) ?? "end_turn" } : { error: res.error };
+      }
+      const outcome = res.ok ? { stopReason } : { error: res.error };
       for (const body of finishAcpTurn(outcome, { turn: this.host.turn() }, this.stream))
         this.host.emit(body);
       this.host.turnEnded();
@@ -926,6 +1023,7 @@ ${tail}` : `Could not start OpenCode: ${why}`, "spawn_failed");
   async interrupt() {
     if (!this.sessionId || !this.client)
       return;
+    this.stopped = true;
     for (const pending of this.requests.values())
       pending.abort();
     this.client.notify("session/cancel", { sessionId: this.sessionId });
@@ -1021,7 +1119,7 @@ ${tail}` : `Could not start OpenCode: ${why}`, "spawn_failed");
     for (const body of showToolForPermission(toolCall, { turn: this.host.turn() }, this.stream))
       this.host.emit(body);
     const kind = toolCall.kind;
-    if (once && (this.mode === "bypassPermissions" || this.mode === "acceptEdits" && kind === "edit")) {
+    if (once && (this.mode === "bypassPermissions" || this.mode === "acceptEdits" && EDIT_KINDS.has(kind))) {
       select(once);
       return;
     }
@@ -1032,7 +1130,7 @@ ${tail}` : `Could not start OpenCode: ${why}`, "spawn_failed");
     this.host.requestPermission({
       toolName: pane.name,
       input: pane.input,
-      suggestions: always ? [sessionRule(pane.name, ruleContent(pane.input))] : [],
+      suggestions: always ? [opencodeRule(pane.name)] : [],
       title: cardTitle(kind, pane.name),
       signal: withdrawn.signal
     }).then(({ decision, via }) => {
@@ -1050,10 +1148,11 @@ ${tail}` : `Could not start OpenCode: ${why}`, "spawn_failed");
       return;
     }
     this.stream.denials += 1;
+    if (decision.message && decision.message !== DENIED_DEFAULT)
+      this.refusal = decision.message;
+    else
+      this.host.note("info", "api", "OpenCode stops its turn when a request is denied.");
     select(options.reject);
-    if (decision.message && decision.message !== "Denied in SpecDriven") {
-      this.host.note("info", "api", "OpenCode does not take a reason with a refusal — tell it in your next message.");
-    }
   }
   exited(code, error) {
     if (this.final)
@@ -1084,7 +1183,7 @@ function createOpencodeProvider(options = {}) {
       canInterrupt: true,
       canChangeModeMidSession: true,
       hasAccount: false,
-      rememberPermissions: "session",
+      rememberPermissions: "rule",
       oneShot: true,
       canChangeModelMidSession: true,
       effort: true,
@@ -1097,13 +1196,13 @@ function createOpencodeProvider(options = {}) {
       command: "opencode auth login"
     },
     async start(opts) {
-      const defaults = await readDefaults(settings);
+      const [defaults, env] = await Promise.all([readDefaults(settings), sessionEnv(opts.cwd)]);
       const session = new OpencodeSession(opts.host, opts.cwd, opts.permissionMode);
       session.client = new AcpClient({
         bin: opencodePath(),
         args: ["acp"],
         cwd: opts.cwd,
-        env: sessionEnv(),
+        env,
         onNotification: (method, params) => session.notification(method, params),
         onRequest: (id, method, params) => session.request(id, method, params),
         onStderr: session.stderr,
@@ -1164,5 +1263,5 @@ export {
   host_default2 as default
 };
 
-//# debugId=50F03A318E96DD0564756E2164756E21
+//# debugId=6F1F38BD5D7261DB64756E2164756E21
 //# sourceMappingURL=host.js.map

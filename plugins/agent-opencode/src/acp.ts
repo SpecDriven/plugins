@@ -431,8 +431,8 @@ interface ToolState {
   title: unknown;
   rawInput: AcpParams;
   locations: unknown;
-  /** Whether its tool_use block is in the log yet. */
-  shown: boolean;
+  /** The row as the log last has it (the pane's tool, as JSON); null before it is shown. */
+  shown: string | null;
 }
 
 /**
@@ -442,10 +442,14 @@ interface ToolState {
  * call, so both are held here until they are whole.
  */
 export interface AcpStreamContext {
-  /** The assistant message streaming now: its id and its text so far. */
-  message: { id: string; text: string } | null;
+  /** The assistant message streaming now: its id in the pane, OpenCode's id for it, and its text so far. */
+  message: { id: string; source: string; text: string } | null;
   /** Assistant messages seen, for ids OpenCode did not give. */
   messages: number;
+  /** How many pieces each of OpenCode's message ids has had this turn: text
+      that goes on under the same id after a tool call is a piece of its own
+      in the pane, below the tool's row, not more of the piece above it. */
+  pieces: Map<string, number>;
   tools: Map<string, ToolState>;
   /** Epoch ms the current turn started at, for the turn footer's duration. */
   turnStartedAt: number | null;
@@ -462,6 +466,7 @@ export function newAcpStream(): AcpStreamContext {
   return {
     message: null,
     messages: 0,
+    pieces: new Map(),
     tools: new Map(),
     turnStartedAt: null,
     cost: 0,
@@ -487,18 +492,34 @@ function flushMessage(ctx: { turn: number }, stream: AcpStreamContext): AgentOut
   ];
 }
 
-/** A tool call's row: its tool_use block, once. */
+/** A tool call's row: its tool_use block — again when what it shows has
+    changed, which the pane takes as the same row, updated. */
 function showTool(id: string, tool: ToolState, ctx: { turn: number }): AgentOutput[] {
-  if (tool.shown) return [];
-  tool.shown = true;
   const pane = paneTool(tool);
+  const key = JSON.stringify(pane);
+  if (tool.shown === key) return [];
+  tool.shown = key;
   const block: AssistantBlock = { type: "tool_use", id, name: pane.name, input: pane.input };
   return [{ kind: "assistant", messageId: `tool-${id}`, turn: ctx.turn, blocks: [block], parentToolUseId: null }];
 }
 
-/** Whether a tool call's input has arrived (OpenCode announces calls before their input). */
-function hasInput(input: AcpParams): boolean {
-  return Object.keys(input).length > 0;
+/** What an update says of a tool call, kept: OpenCode announces a call
+    ("pending") before its input is whole, and fills it in as it starts. */
+function mergeTool(update: AcpParams, stream: AcpStreamContext): { id: string; tool: ToolState } | null {
+  const id = text(update.toolCallId);
+  if (!id) return null;
+  let tool = stream.tools.get(id);
+  if (!tool) {
+    tool = { kind: null, name: null, title: null, rawInput: {}, locations: null, shown: null };
+    stream.tools.set(id, tool);
+  }
+  if (update.kind !== undefined) tool.kind = update.kind;
+  if (update.name !== undefined) tool.name = update.name;
+  if (update.title !== undefined) tool.title = update.title;
+  if (Array.isArray(update.locations) && update.locations.length > 0) tool.locations = update.locations;
+  const input = record(update.rawInput);
+  if (input && Object.keys(input).length > 0) tool.rawInput = input;
+  return { id, tool };
 }
 
 /**
@@ -518,10 +539,13 @@ export function mapAcpUpdate(
       if (!chunk) return [];
       const id = text(update.messageId);
       const events: AgentOutput[] = [];
-      if (stream.message && id && stream.message.id !== id) events.push(...flushMessage(ctx, stream));
+      if (stream.message && id && stream.message.source !== id) events.push(...flushMessage(ctx, stream));
       if (!stream.message) {
         stream.messages += 1;
-        stream.message = { id: id ?? `opencode-${stream.messages}`, text: "" };
+        const source = id ?? `opencode-${stream.messages}`;
+        const piece = (stream.pieces.get(source) ?? 0) + 1;
+        stream.pieces.set(source, piece);
+        stream.message = { id: piece === 1 ? source : `${source}#${piece}`, source, text: "" };
       }
       stream.message.text += chunk;
       events.push({ kind: "text_delta", messageId: stream.message.id, index: 0, text: chunk });
@@ -529,23 +553,15 @@ export function mapAcpUpdate(
     }
     case "tool_call":
     case "tool_call_update": {
-      const id = text(update.toolCallId);
-      if (!id) return [];
+      const merged = mergeTool(update, stream);
+      if (!merged) return [];
+      const { id, tool } = merged;
       const events = flushMessage(ctx, stream);
-      let tool = stream.tools.get(id);
-      if (!tool) {
-        tool = { kind: null, name: null, title: null, rawInput: {}, locations: null, shown: false };
-        stream.tools.set(id, tool);
-      }
-      if (update.kind !== undefined) tool.kind = update.kind;
-      if (update.name !== undefined) tool.name = update.name;
-      if (update.title !== undefined) tool.title = update.title;
-      if (Array.isArray(update.locations) && update.locations.length > 0) tool.locations = update.locations;
-      const input = record(update.rawInput);
-      if (input && hasInput(input)) tool.rawInput = input;
-      const status = text(update.status);
+      // A call's status is "pending" until it says otherwise (ACP), and a
+      // pending call's input is not whole: its row waits for it to start.
+      const status = text(update.status) ?? (update.sessionUpdate === "tool_call" ? "pending" : null);
       const finished = status === "completed" || status === "failed";
-      if (hasInput(tool.rawInput) || finished) events.push(...showTool(id, tool, ctx));
+      if (status === "in_progress" || finished || tool.shown !== null) events.push(...showTool(id, tool, ctx));
       if (finished) {
         stream.tools.delete(id);
         events.push({
@@ -569,9 +585,9 @@ export function showToolForPermission(
   ctx: { turn: number },
   stream: AcpStreamContext,
 ): AgentOutput[] {
-  const id = text(toolCall.toolCallId);
-  if (!id) return [];
-  return mapAcpUpdate({ ...toolCall, sessionUpdate: "tool_call_update", status: "pending" }, ctx, stream);
+  const merged = mergeTool(toolCall, stream);
+  if (!merged) return [];
+  return [...flushMessage(ctx, stream), ...showTool(merged.id, merged.tool, ctx)];
 }
 
 /** `usage_update` → the context count, and the session's cost so far. */
@@ -604,6 +620,7 @@ export function finishAcpTurn(
     events.push({ kind: "tool_result", toolUseId: id, content: "Stopped", isError: true, parentToolUseId: null });
   }
   stream.tools.clear();
+  stream.pieces.clear();
   const errors = [...stream.errors];
   let subtype = "success";
   if ("error" in outcome) {

@@ -32,14 +32,26 @@ const CATALOG_TTL_MS = 60_000;
 
 export type ModelLister = () => Promise<string[]>;
 
-/** `opencode models`: one model per line; [] when it fails. */
-const listWithCli: ModelLister = async () => {
-  const res = await run(opencodePath(), ["models"], { cwd: homedir() });
-  if (res.exitCode !== 0) return [];
-  return res.stdout
+/** `opencode models` output: one `provider/model` per line. */
+export function parseModels(stdout: string): string[] {
+  return stdout
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => /^[^\s/]+\/\S+$/.test(line));
+}
+
+/**
+ * `opencode models`; [] when it fails. `--standalone` first: without it the
+ * CLI starts OpenCode's background service and leaves it running, which a
+ * model menu has no business doing. A CLI that does not know the flag is
+ * asked again without it.
+ */
+const listWithCli: ModelLister = async () => {
+  const bin = opencodePath();
+  const alone = await run(bin, ["models", "--standalone"], { cwd: homedir() });
+  if (alone.exitCode === 0) return parseModels(alone.stdout);
+  const res = await run(bin, ["models"], { cwd: homedir() });
+  return res.exitCode === 0 ? parseModels(res.stdout) : [];
 };
 
 let lister: ModelLister | null = null;

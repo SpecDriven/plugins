@@ -1,11 +1,14 @@
 // The app's one-shot turns (an estimate: a system prompt, a prompt, a
 // schema to fit, an answer and nothing else) through `opencode run`,
-// OpenCode's non-interactive mode, with its read-only Plan agent and the
-// session archived so it stays out of OpenCode's session list. It prints
-// its events as JSON lines (--format json): `text` parts carry the answer,
-// an `error` event the reason there is none. It has no system-prompt flag,
-// so the system prompt leads the message, and the schema goes in as words.
-// The spawn seam is acp.ts's, so tests drive a fake child.
+// OpenCode's non-interactive mode, with its read-only Plan agent, on a
+// private server (--standalone: the CLI's background service is not
+// started for it) and the session archived so it stays out of OpenCode's
+// session list. The message goes in on stdin — no length limit, and
+// nothing in it read as a flag. It prints its events as JSON lines
+// (--format json): `text` parts carry the answer, an `error` event the
+// reason there is none. It has no system-prompt flag, so the system prompt
+// leads the message, and the schema goes in as words. The spawn seam is
+// acp.ts's, so tests drive a fake child.
 //
 // Node APIs only (src/server/run.ts in the app): this module also runs
 // under Electron.
@@ -18,9 +21,9 @@ import { opencodeSpawner, record } from "./acp";
 /** The stderr lines kept for the error text. */
 const STDERR_TAIL = 5;
 
-/** The `opencode run` argv for one turn. */
-export function runArgs(message: string, model?: string): string[] {
-  return ["run", "--format", "json", "--agent", "plan", "--archived", ...(model ? ["-m", model] : []), message];
+/** The `opencode run` argv for one turn; the message itself comes on stdin. */
+export function runArgs(model?: string): string[] {
+  return ["run", "--standalone", "--format", "json", "--agent", "plan", "--archived", ...(model ? ["-m", model] : [])];
 }
 
 /** The one message: the system prompt, the question, and the schema the answer must fit. */
@@ -86,7 +89,7 @@ export async function opencodeOneShot(req: OneShotRequest): Promise<OneShotResul
     };
     const child = opencodeSpawner()({
       bin: opencodePath(),
-      args: runArgs(oneShotMessage(req), req.model),
+      args: runArgs(req.model),
       cwd: req.cwd,
       env: process.env,
       onStdout: readStdout,
@@ -106,7 +109,7 @@ export async function opencodeOneShot(req: OneShotRequest): Promise<OneShotResul
       },
     });
     proc = child;
-    // `opencode run` would read a piped stdin as more of the message.
+    child.write(oneShotMessage(req));
     child.end();
     if (settled) return;
     timer = setTimeout(() => {

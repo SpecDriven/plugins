@@ -3,8 +3,10 @@
 // `session/prompt`, whose answer ends it; a Stop is `session/cancel`. The
 // permissions OpenCode asks for arrive as `session/request_permission`
 // requests, which the pane's permission cards answer — or the plugin does,
-// where the pane's mode says so (src/config.ts). The model, the effort and
-// OpenCode's Plan agent are the session's config options, switched with
+// where the pane's mode says so (src/config.ts). OpenCode ends its turn on
+// a refusal, so a refusal with a reason is followed by the reason as the
+// next prompt of the same pane turn. The model, the effort and OpenCode's
+// Plan agent are the session's config options, switched with
 // `session/set_config_option` at any time. An AgentProvider
 // (src/plugins/host/agents.ts in the app); its one-shot turns run
 // `opencode run` instead (src/oneShot.ts).
@@ -84,15 +86,22 @@ export function acpMcpServer(server: AgentMcpServer): AcpParams {
   };
 }
 
-/** "Allow always" here: OpenCode's "Always allow", which lasts the session. */
-function sessionRule(toolName: string, ruleContent: string): PermissionSuggestion {
-  return {
-    type: "addRules",
-    rules: [{ toolName, ...(ruleContent ? { ruleContent } : {}) }],
-    behavior: "allow",
-    destination: "session",
-  };
+/**
+ * "Allow always" here is OpenCode's "Always allow": OpenCode keeps a rule
+ * of its own making for the folder — for a command, every command that
+ * starts the same way — and stops asking, in later sessions too (checked
+ * against OpenCode 2.2.7). The request does not say what the rule will be,
+ * so the suggestion names only the tool.
+ */
+function opencodeRule(toolName: string): PermissionSuggestion {
+  return { type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "opencode" };
 }
+
+/** The kinds of tool call that change files: what "accept edits" lets through. */
+const EDIT_KINDS: ReadonlySet<unknown> = new Set(["edit", "delete", "move"]);
+
+/** What the pane's refusal says when the user typed no reason (the app's words). */
+const DENIED_DEFAULT = "Denied in SpecDriven";
 
 /** A permission option of the given kind, from the request's list. */
 function optionOf(options: unknown, kind: string): string | null {
@@ -120,11 +129,6 @@ function cardTitle(kind: unknown, toolName: string): string {
   }
 }
 
-/** What a card names the call by, for "Allow always". */
-function ruleContent(input: Record<string, unknown>): string {
-  return str(input.command) ?? str(input.file_path) ?? str(input.url) ?? str(input.pattern) ?? "";
-}
-
 class OpencodeSession implements AgentSession {
   client: AcpClient | null = null;
   private readonly stream: AcpStreamContext = newAcpStream();
@@ -136,8 +140,10 @@ class OpencodeSession implements AgentSession {
   /** The model OpenCode started on: what "the agent's own default" switches back to. */
   private ownModel: string | null = null;
   private mode: PermissionMode;
-  /** Prompts in flight; the turn ends when the last one is answered. */
-  private inFlight = 0;
+  /** Why the user refused a request this turn: sent to OpenCode once it has ended its turn over the refusal. */
+  private refusal: string | null = null;
+  /** The user pressed Stop this turn: the turn ends, whatever was refused. */
+  private stopped = false;
   private commands: SlashCommandInfo[] | null = null;
   private isReady = false;
   private lastCount: number | null = null;
@@ -274,12 +280,25 @@ class OpencodeSession implements AgentSession {
     if (prompt.length === 0) prompt.push({ type: "text", text: "" });
     this.host.turnStarted();
     startAcpTurn(this.stream);
-    this.inFlight += 1;
+    this.refusal = null;
+    this.stopped = false;
+    this.prompt(prompt);
+  }
+
+  /** One `session/prompt`; its answer ends the pane's turn — unless OpenCode
+      stopped over a refusal the user gave a reason for, which goes back to
+      it as the next prompt of the same turn. */
+  private prompt(prompt: AcpParams[]): void {
     void this.client!.request("session/prompt", { sessionId: this.sessionId, prompt }, 0).then((res) => {
-      this.inFlight = Math.max(0, this.inFlight - 1);
       if (this.final) return;
-      if (this.inFlight > 0 && res.ok) return;
-      const outcome = res.ok ? { stopReason: str(res.result.stopReason) ?? "end_turn" } : { error: res.error };
+      const stopReason = res.ok ? (str(res.result.stopReason) ?? "end_turn") : null;
+      const refusal = this.refusal;
+      this.refusal = null;
+      if (stopReason === "cancelled" && refusal && !this.stopped) {
+        this.prompt([{ type: "text", text: `The user declined that, saying: ${refusal}` }]);
+        return;
+      }
+      const outcome = res.ok ? { stopReason: stopReason! } : { error: res.error };
       for (const body of finishAcpTurn(outcome, { turn: this.host.turn() }, this.stream)) this.host.emit(body);
       this.host.turnEnded();
     });
@@ -287,6 +306,7 @@ class OpencodeSession implements AgentSession {
 
   async interrupt(): Promise<void> {
     if (!this.sessionId || !this.client) return;
+    this.stopped = true;
     // Open cards close; OpenCode hears "cancelled" for each, as ACP asks.
     for (const pending of this.requests.values()) pending.abort();
     // The turn's own answer (stopReason "cancelled") puts the session back to idle.
@@ -382,7 +402,7 @@ class OpencodeSession implements AgentSession {
 
     // The mode answers what it allows without a card.
     const kind = toolCall.kind;
-    if (once && (this.mode === "bypassPermissions" || (this.mode === "acceptEdits" && kind === "edit"))) {
+    if (once && (this.mode === "bypassPermissions" || (this.mode === "acceptEdits" && EDIT_KINDS.has(kind)))) {
       select(once);
       return;
     }
@@ -395,7 +415,7 @@ class OpencodeSession implements AgentSession {
       .requestPermission({
         toolName: pane.name,
         input: pane.input,
-        suggestions: always ? [sessionRule(pane.name, ruleContent(pane.input))] : [],
+        suggestions: always ? [opencodeRule(pane.name)] : [],
         title: cardTitle(kind, pane.name),
         signal: withdrawn.signal,
       })
@@ -421,12 +441,12 @@ class OpencodeSession implements AgentSession {
       return;
     }
     this.stream.denials += 1;
+    // ACP's refusal carries no words, and OpenCode ends its turn on one
+    // (the prompt answers "cancelled"). A reason the user typed goes to it
+    // then, as the next prompt (prompt()); without one the turn is over.
+    if (decision.message && decision.message !== DENIED_DEFAULT) this.refusal = decision.message;
+    else this.host.note("info", "api", "OpenCode stops its turn when a request is denied.");
     select(options.reject);
-    // ACP's refusal carries no words; the reason the user typed is in the
-    // transcript for them, and OpenCode hears a plain "rejected".
-    if (decision.message && decision.message !== "Denied in SpecDriven") {
-      this.host.note("info", "api", "OpenCode does not take a reason with a refusal — tell it in your next message.");
-    }
   }
 
   /** OpenCode is gone: an exit code of its own, or an Error where it never started. */
@@ -460,7 +480,8 @@ export function createOpencodeProvider(options: OpencodeProviderOptions = {}): A
       canInterrupt: true,
       canChangeModeMidSession: true,
       hasAccount: false,
-      rememberPermissions: "session",
+      // "Allow always" is a rule OpenCode keeps for the folder (opencodeRule).
+      rememberPermissions: "rule",
       oneShot: true,
       canChangeModelMidSession: true,
       effort: true,
@@ -473,13 +494,15 @@ export function createOpencodeProvider(options: OpencodeProviderOptions = {}): A
       command: "opencode auth login",
     },
     async start(opts: AgentStartOptions): Promise<AgentSession> {
-      const defaults = await readDefaults(settings);
+      // The defaults, and each OpenCode agent's rules in this folder with
+      // allow turned to ask (src/config.ts) — a moment, before the spawn.
+      const [defaults, env] = await Promise.all([readDefaults(settings), sessionEnv(opts.cwd)]);
       const session = new OpencodeSession(opts.host, opts.cwd, opts.permissionMode);
       session.client = new AcpClient({
         bin: opencodePath(),
         args: ["acp"],
         cwd: opts.cwd,
-        env: sessionEnv(),
+        env,
         onNotification: (method, params) => session.notification(method, params),
         onRequest: (id, method, params) => session.request(id, method, params),
         onStderr: session.stderr,

@@ -3,6 +3,9 @@
 // one-shot turns through `opencode run`.
 
 import { describe, expect, test, afterEach } from "bun:test";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   AcpClient,
   acpCommands,
@@ -17,8 +20,9 @@ import {
   startAcpTurn,
 } from "../src/acp";
 import type { OpencodeSpawnOptions } from "../src/acp";
-import { sessionConfigContent } from "../src/config";
-import { modelMenu } from "../src/models";
+import { findOpencode, installerPath } from "../src/cli";
+import { askingRules, parseResolvedAgents, sessionConfigContent } from "../src/config";
+import { modelMenu, parseModels } from "../src/models";
 import { oneShotMessage, opencodeOneShot, parseAnswer, runArgs } from "../src/oneShot";
 import { acpMcpServer } from "../src/provider";
 import { FakeOpencode } from "./fakeOpencode";
@@ -43,7 +47,11 @@ describe("mapAcpUpdate", () => {
     // Thoughts, plans and replays are not the pane's.
     expect(mapAcpUpdate({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hm" } }, ctx, stream)).toEqual([]);
     expect(mapAcpUpdate({ sessionUpdate: "plan", entries: [] }, ctx, stream)).toEqual([]);
-    const tool = mapAcpUpdate({ sessionUpdate: "tool_call", toolCallId: "t", kind: "read", name: "read", rawInput: { filePath: "a.ts" } }, ctx, stream);
+    const tool = mapAcpUpdate(
+      { sessionUpdate: "tool_call", toolCallId: "t", kind: "read", name: "read", status: "in_progress", rawInput: { filePath: "a.ts" } },
+      ctx,
+      stream,
+    );
     expect(tool).toEqual([
       { kind: "assistant", messageId: "b", turn: 1, blocks: [{ type: "text", text: "Hi" }], parentToolUseId: null },
       {
@@ -56,9 +64,40 @@ describe("mapAcpUpdate", () => {
     ]);
   });
 
+  test("text that goes on under the same message id after a tool call is a piece of its own", () => {
+    const stream = newAcpStream();
+    const ctx = { turn: 1 };
+    const chunk = (text: string) => ({ sessionUpdate: "agent_message_chunk", messageId: "m", content: { type: "text", text } });
+    mapAcpUpdate(chunk("Before."), ctx, stream);
+    mapAcpUpdate({ sessionUpdate: "tool_call", toolCallId: "t", kind: "read", name: "read", status: "in_progress", rawInput: { path: "a" } }, ctx, stream);
+    // The pane keys a message by its id: the same id again would be glued
+    // onto the text above the tool's row.
+    expect(mapAcpUpdate(chunk("After."), ctx, stream)).toEqual([{ kind: "text_delta", messageId: "m#2", index: 0, text: "After." }]);
+    expect(finishAcpTurn({ stopReason: "end_turn" }, ctx, stream)[0]).toMatchObject({ messageId: "m#2", blocks: [{ type: "text", text: "After." }] });
+    // A new turn starts the count again.
+    expect(mapAcpUpdate(chunk("Next turn."), { turn: 2 }, stream)[0]).toMatchObject({ messageId: "m" });
+  });
+
   test("a tool's row waits for its input, and its result closes it", () => {
     const stream = newAcpStream();
     const ctx = { turn: 2 };
+    // OpenCode announces a shell call with its folder alone; the command comes as it starts.
+    expect(
+      mapAcpUpdate({ sessionUpdate: "tool_call", toolCallId: "sh", kind: "execute", name: "shell", title: "shell", status: "pending", rawInput: { cwd: "/w" } }, ctx, stream),
+    ).toEqual([]);
+    const started = mapAcpUpdate(
+      { sessionUpdate: "tool_call_update", toolCallId: "sh", status: "in_progress", title: "ls", rawInput: { command: "ls", workdir: "/w" } },
+      ctx,
+      stream,
+    );
+    expect(started).toMatchObject([{ blocks: [{ type: "tool_use", id: "sh", name: "Bash", input: { command: "ls" } }] }]);
+    // A row already shown is shown again when what it says has changed, and only then.
+    expect(mapAcpUpdate({ sessionUpdate: "tool_call_update", toolCallId: "sh", status: "in_progress", rawInput: { command: "ls -la", workdir: "/w" } }, ctx, stream)).toMatchObject([
+      { messageId: "tool-sh", blocks: [{ type: "tool_use", id: "sh", input: { command: "ls -la" } }] },
+    ]);
+    expect(mapAcpUpdate({ sessionUpdate: "tool_call_update", toolCallId: "sh", status: "completed", content: [] }, ctx, stream)).toEqual([
+      { kind: "tool_result", toolUseId: "sh", content: "", isError: false, parentToolUseId: null },
+    ]);
     expect(mapAcpUpdate({ sessionUpdate: "tool_call", toolCallId: "t", kind: "edit", name: "write", status: "pending", rawInput: {} }, ctx, stream)).toEqual([]);
     const shown = mapAcpUpdate(
       { sessionUpdate: "tool_call_update", toolCallId: "t", status: "in_progress", rawInput: { path: "x.md", content: "y" }, locations: [{ path: "/w/x.md" }] },
@@ -175,6 +214,71 @@ describe("sessionConfigContent", () => {
   });
 });
 
+describe("an agent's rules, asking", () => {
+  test("allow becomes ask, in order, and a deny or an ask stays what it was", () => {
+    const rules = [
+      { action: "*", resource: "*", effect: "allow" },
+      { action: "read", resource: "*.env", effect: "ask" },
+      { action: "shell", resource: "git *", effect: "deny" },
+      { action: "shell", resource: "git status*", effect: "allow" },
+      { action: "shell", resource: "*", effect: "allow" },
+    ];
+    // The last match wins in OpenCode: "*" stated again moves to the end,
+    // where it now hides the git rules — as it did in the user's own list.
+    expect(Object.entries(askingRules(rules, "shell"))).toEqual([
+      ["git *", "deny"],
+      ["git status*", "ask"],
+      ["*", "ask"],
+    ]);
+    expect(askingRules(rules, "edit")).toEqual({ "*": "ask" });
+    // An agent that may do nothing (`* * deny`) is not given an ask.
+    expect(askingRules([{ action: "*", resource: "*", effect: "deny" }], "edit")).toEqual({ "*": "deny" });
+  });
+
+  test("`opencode debug agents` output, and a config that keeps what else an agent's section says", () => {
+    const agents = parseResolvedAgents(
+      JSON.stringify([
+        { id: "build", mode: "primary", permissions: [{ action: "shell", resource: "rm *", effect: "deny" }, { action: 1 }] },
+        { name: "no id" },
+      ]),
+    );
+    expect(agents).toEqual([{ id: "build", rules: [{ action: "shell", resource: "rm *", effect: "deny" }] }]);
+    expect(parseResolvedAgents("Error: no such command")).toBeNull();
+    const config = JSON.parse(sessionConfigContent(JSON.stringify({ agent: { build: { model: "a/b", permission: { read: "allow" } } } }), agents));
+    expect(config.agent.build).toEqual({
+      model: "a/b",
+      permission: { read: "allow", edit: { "*": "ask" }, bash: { "*": "ask", "rm *": "deny" }, webfetch: { "*": "ask" } },
+    });
+  });
+});
+
+describe("where the CLI is", () => {
+  const realPath = process.env.PATH;
+  afterEach(() => {
+    process.env.PATH = realPath;
+  });
+
+  test("PATH first, else where OpenCode's installer puts it — a desktop app's PATH lacks that folder", async () => {
+    const home = await mkdtemp(join(tmpdir(), "specdriven-opencode-home-"));
+    try {
+      process.env.PATH = join(home, "empty");
+      expect(findOpencode(home)).toBeNull();
+      const installed = installerPath(home);
+      await mkdir(join(home, ".opencode", "bin"), { recursive: true });
+      await writeFile(installed, "#!/bin/sh\n");
+      await chmod(installed, 0o755);
+      expect(findOpencode(home)).toBe(installed);
+      await mkdir(join(home, "bin"));
+      await writeFile(join(home, "bin", "opencode"), "#!/bin/sh\n");
+      await chmod(join(home, "bin", "opencode"), 0o755);
+      process.env.PATH = join(home, "bin");
+      expect(findOpencode(home)).toBe(join(home, "bin", "opencode"));
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("modelMenu", () => {
   const catalog = ["a/1", "a/2", "b/1"];
   test("the data repo's list, whole and in its order", () => {
@@ -185,6 +289,9 @@ describe("modelMenu", () => {
   });
   test("else the catalog", () => {
     expect(modelMenu({ catalog, listed: [], recent: [], defaultModel: null }).map((m) => m.value)).toEqual(catalog);
+  });
+  test("`opencode models` output: one provider/model per line, and nothing else", () => {
+    expect(parseModels("a/1\nopenrouter/z-ai/glm-4.7\n\nSome notice\n  b/2  \n")).toEqual(["a/1", "openrouter/z-ai/glm-4.7", "b/2"]);
   });
 });
 
@@ -221,22 +328,24 @@ describe("AcpClient", () => {
 });
 
 describe("one-shot turns", () => {
-  function fakeRun(lines: Record<string, unknown>[], code = 0): { spawned: OpencodeSpawnOptions[] } {
+  function fakeRun(lines: Record<string, unknown>[], code = 0): { spawned: OpencodeSpawnOptions[]; procs: FakeOpencode[] } {
     const spawned: OpencodeSpawnOptions[] = [];
+    const procs: FakeOpencode[] = [];
     setOpencodeSpawn((options) => {
       spawned.push(options);
       const proc = new FakeOpencode(options);
+      procs.push(proc);
       queueMicrotask(() => {
         for (const line of lines) options.onStdout(JSON.stringify(line) + "\n");
         proc.exit(code);
       });
       return proc;
     });
-    return { spawned };
+    return { spawned, procs };
   }
 
   test("`opencode run` with the Plan agent; the text parts are the answer, parsed when a schema asks", async () => {
-    const { spawned } = fakeRun([
+    const { spawned, procs } = fakeRun([
       { type: "step_start" },
       { type: "text", part: { type: "text", text: '{"hours":' } },
       { type: "text", part: { type: "text", text: " 3}" } },
@@ -245,8 +354,13 @@ describe("one-shot turns", () => {
     const schema = { type: "object", properties: { hours: { type: "number" } } };
     const result = await opencodeOneShot({ cwd: "/w", systemPrompt: "You estimate.", prompt: "How long?", schema, model: "a/b", timeoutMs: 5000 });
     expect(result).toEqual({ text: '{"hours": 3}', structured: { hours: 3 }, isError: false });
-    expect(spawned[0]!.args).toEqual(runArgs(oneShotMessage({ systemPrompt: "You estimate.", prompt: "How long?", schema }), "a/b"));
-    expect(spawned[0]!.args.slice(0, 7)).toEqual(["run", "--format", "json", "--agent", "plan", "--archived", "-m"]);
+    // A private server (no background service left behind), read-only, out
+    // of OpenCode's session list; the message on stdin, which is then closed.
+    expect(spawned[0]!.args).toEqual(["run", "--standalone", "--format", "json", "--agent", "plan", "--archived", "-m", "a/b"]);
+    expect(runArgs()).toEqual(["run", "--standalone", "--format", "json", "--agent", "plan", "--archived"]);
+    expect(procs[0]!.stdin).toBe(oneShotMessage({ systemPrompt: "You estimate.", prompt: "How long?", schema }));
+    expect(procs[0]!.stdin).toStartWith("You estimate.\n\nHow long?\n\nAnswer with one JSON value");
+    expect(procs[0]!.ended).toBe(true);
     expect(spawned[0]!.cwd).toBe("/w");
   });
 

@@ -15,6 +15,8 @@ import { PROJECT_SETTINGS_FILE } from "@specdriven/app/src/server/members";
 import { readState, writeState } from "@specdriven/app/src/server/state";
 import { setOpencodeSpawn } from "../src/acp";
 import { setOpencodeAvailability } from "../src/cli";
+import { setAgentRulesReader } from "../src/config";
+import type { ResolvedAgent } from "../src/config";
 import { setModelLister } from "../src/models";
 import { FakeOpencode, MODELS } from "./fakeOpencode";
 import { mountPlugin, quietProfile } from "./app";
@@ -24,6 +26,9 @@ let root: string;
 let home: string;
 let data: string;
 let fakes: FakeOpencode[];
+/** What `opencode debug agents` "answers": the agents' resolved rules, or null when it cannot say. */
+let resolved: ResolvedAgent[] | null;
+let rulesAskedIn: string[];
 const realRoot = process.env.SPECDRIVEN_ROOT;
 const realHome = process.env.SPECDRIVEN_HOME;
 const realState = process.env.XDG_STATE_HOME;
@@ -44,6 +49,12 @@ beforeEach(async () => {
     return fake;
   });
   setModelLister(async () => MODELS);
+  resolved = null;
+  rulesAskedIn = [];
+  setAgentRulesReader(async (cwd) => {
+    rulesAskedIn.push(cwd);
+    return resolved;
+  });
   await writeState({ dataRepo: data, ...quietProfile(data) }, root);
   unmount = await mountPlugin();
   await createFeature(data, "Quote");
@@ -57,6 +68,7 @@ afterEach(async () => {
   setOpencodeAvailability(null);
   setOpencodeSpawn(null);
   setModelLister(null);
+  setAgentRulesReader(null);
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
   for (const [name, value] of [
@@ -126,8 +138,11 @@ test("an OpenCode session spawns `opencode acp` on the work dir, asking for edit
   expect(oc.options.args).toEqual(["acp"]);
   expect(oc.options.cwd).toBe(data);
   // OpenCode runs edits and commands unasked by default; this process asks.
-  const config = JSON.parse(oc.options.env.OPENCODE_CONFIG_CONTENT!) as { permission: Record<string, string> };
+  const config = JSON.parse(oc.options.env.OPENCODE_CONFIG_CONTENT!) as { permission: Record<string, string>; agent?: unknown };
   expect(config.permission).toMatchObject({ edit: "ask", bash: "ask", webfetch: "ask" });
+  // OpenCode could not list its agents' rules here, so that is all it says.
+  expect(rulesAskedIn).toEqual([data]);
+  expect(config.agent).toBeUndefined();
 
   const ready = await untilStatus(meta.id, "idle");
   expect(oc.calls("initialize")[0]!.params).toMatchObject({ protocolVersion: 1, clientInfo: { name: "specdriven" } });
@@ -150,6 +165,40 @@ test("an OpenCode session spawns `opencode acp` on the work dir, asking for edit
     (r) => r?.agentSessionId === "ses_fake_1",
   );
   expect(record).toMatchObject({ agent: "opencode", cwd: data, dataRepo: data });
+});
+
+test("the user's own denials, and the Plan agent's on edits, stand: only what OpenCode allows becomes a question", async () => {
+  resolved = [
+    {
+      id: "build",
+      rules: [
+        { action: "*", resource: "*", effect: "allow" },
+        { action: "shell", resource: "*", effect: "allow" },
+        { action: "shell", resource: "git push*", effect: "deny" },
+      ],
+    },
+    {
+      id: "plan",
+      rules: [
+        { action: "*", resource: "*", effect: "allow" },
+        { action: "edit", resource: "*", effect: "deny" },
+        { action: "edit", resource: "/home/u/.opencode/plan/*", effect: "allow" },
+        { action: "shell", resource: "git push*", effect: "deny" },
+      ],
+    },
+  ];
+  const { oc } = await idleSession();
+  const config = JSON.parse(oc.options.env.OPENCODE_CONFIG_CONTENT!) as {
+    agent: Record<string, { permission: Record<string, Record<string, string>> }>;
+  };
+  expect(config.agent.build!.permission.bash).toEqual({ "*": "ask", "git push*": "deny" });
+  expect(config.agent.build!.permission.edit).toEqual({ "*": "ask" });
+  // Plan stays read-only but for its own plan files, which now ask.
+  expect(Object.entries(config.agent.plan!.permission.edit!)).toEqual([
+    ["*", "deny"],
+    ["/home/u/.opencode/plan/*", "ask"],
+  ]);
+  expect(config.agent.plan!.permission.bash).toEqual({ "*": "ask", "git push*": "deny" });
 });
 
 test("a turn goes out as session/prompt, and its reply, tools, context and cost stream into the log", async () => {
@@ -260,9 +309,8 @@ test("OpenCode's permission requests are the pane's cards: once, always, or a re
   askPermission(oc, 0, shellCall("ls"));
   const [card] = (await untilEvent(id, (e) => e.kind === "permission_request")) as Extract<ChatEvent, { kind: "permission_request" }>[];
   expect(card).toMatchObject({ toolName: "Bash", input: { command: "ls" }, title: "OpenCode wants to run a command" });
-  expect(card!.suggestions).toEqual([
-    { type: "addRules", rules: [{ toolName: "Bash", ruleContent: "ls" }], behavior: "allow", destination: "session" },
-  ]);
+  // "Allow always" is OpenCode's own rule for the folder; the request does not say which.
+  expect(card!.suggestions).toEqual([{ type: "addRules", rules: [{ toolName: "Bash" }], behavior: "allow", destination: "opencode" }]);
   // The row the card is about is already in the log.
   expect((await snapshot(id)).events.some((e) => e.kind === "assistant" && JSON.stringify(e).includes("call-ls"))).toBe(true);
   await api(`/api/agent/chat/${id}/permission`, "POST", { requestId: card!.requestId, behavior: "allow" });
@@ -283,10 +331,33 @@ test("OpenCode's permission requests are the pane's cards: once, always, or a re
   await until(async () => oc.answer(2), (a) => a !== undefined);
   expect(oc.answer(2)!.result).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
 
+  // OpenCode ends its turn on a refusal; the reason goes to it as the next
+  // prompt, and the pane's turn goes on.
+  oc.finishPrompt({ stopReason: "cancelled" });
+  const prompts = await until(async () => oc.calls("session/prompt"), (c) => c.length === 2);
+  expect(prompts[1]!.params!.prompt).toEqual([{ type: "text", text: "The user declined that, saying: not that file" }]);
+  expect((await snapshot(id)).meta.status).toBe("running");
+  oc.update({ sessionUpdate: "agent_message_chunk", messageId: "m9", content: { type: "text", text: "Understood." } });
   oc.finishPrompt();
   const done = await untilStatus(id, "idle");
-  expect(done.events.find((e) => e.kind === "result")).toMatchObject({ denials: 1 });
-  expect(notes(done).some((t) => t.includes("does not take a reason"))).toBe(true);
+  const results = done.events.filter((e) => e.kind === "result");
+  expect(results).toHaveLength(1);
+  expect(results[0]).toMatchObject({ subtype: "success", denials: 1 });
+});
+
+test("a refusal without a reason ends OpenCode's turn, and the pane says so", async () => {
+  const { id, oc } = await idleSession();
+  await runningTurn(oc, id);
+  askPermission(oc, 0, shellCall("make deploy"));
+  const [card] = (await untilEvent(id, (e) => e.kind === "permission_request")) as { requestId: string }[];
+  await api(`/api/agent/chat/${id}/permission`, "POST", { requestId: card!.requestId, behavior: "deny" });
+  await until(async () => oc.answer(0), (a) => a !== undefined);
+  oc.update({ sessionUpdate: "tool_call_update", toolCallId: "call-make deploy", status: "failed", content: [{ type: "content", content: { type: "text", text: "The user declined this tool call" } }] });
+  oc.finishPrompt({ stopReason: "cancelled" });
+  const done = await untilStatus(id, "idle");
+  expect(oc.calls("session/prompt")).toHaveLength(1);
+  expect(done.events.find((e) => e.kind === "result")).toMatchObject({ isError: false, denials: 1 });
+  expect(notes(done)).toContain("OpenCode stops its turn when a request is denied.");
 });
 
 test("bypass answers every request itself, and accept edits answers the edits", async () => {
@@ -301,6 +372,9 @@ test("bypass answers every request itself, and accept edits answers the edits", 
   askPermission(oc, 1, writeCall);
   await until(async () => oc.answer(1), (a) => a !== undefined);
   expect(oc.answer(1)!.result).toEqual({ outcome: { outcome: "selected", optionId: "once" } });
+  askPermission(oc, 3, { toolCallId: "call-rm", name: "delete", title: "old.txt", kind: "delete", status: "pending", rawInput: { path: "old.txt" } });
+  await until(async () => oc.answer(3), (a) => a !== undefined);
+  expect(oc.answer(3)!.result).toEqual({ outcome: { outcome: "selected", optionId: "once" } });
   askPermission(oc, 2, shellCall("ls"));
   await untilEvent(id, (e) => e.kind === "permission_request");
   expect(oc.answer(2)).toBeUndefined();
@@ -338,7 +412,9 @@ test("Stop cancels the turn and withdraws an open card", async () => {
   oc.finishPrompt({ stopReason: "cancelled" });
   const done = await untilStatus(id, "idle");
   expect(done.events.find((e) => e.kind === "result")).toMatchObject({ subtype: "interrupted", isError: false, denials: 0 });
-  // The call that never finished does not stay open.
+  // A refusal's reason is not sent after a Stop, and the call that never
+  // finished does not stay open.
+  expect(oc.calls("session/prompt")).toHaveLength(1);
   expect(done.events.find((e) => e.kind === "tool_result")).toMatchObject({ toolUseId: "call-make", content: "Stopped" });
 });
 

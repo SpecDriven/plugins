@@ -21,6 +21,8 @@ export class FakeOpencode implements OpencodeProcess {
   mode = "build";
   /** Fail `session/new` with this message. */
   failNew: string | null = null;
+  /** Everything written to stdin, as it came (a one-shot's message is plain text). */
+  stdin = "";
   private buffer = "";
   private exited = false;
   ended = false;
@@ -37,12 +39,18 @@ export class FakeOpencode implements OpencodeProcess {
   }
 
   write(text: string): void {
+    this.stdin += text;
     this.buffer += text;
     let nl: number;
     while ((nl = this.buffer.indexOf("\n")) >= 0) {
       const line = this.buffer.slice(0, nl);
       this.buffer = this.buffer.slice(nl + 1);
-      const message = JSON.parse(line) as Message;
+      let message: Message;
+      try {
+        message = JSON.parse(line) as Message;
+      } catch {
+        continue; // not JSON-RPC: a one-shot's message
+      }
       this.written.push(message);
       this.autoAnswer(message);
     }
