@@ -1,0 +1,25 @@
+{
+  "plugin": "agent-pi",
+  "releases": [
+    {
+      "version": "1.1.0",
+      "file": "agent-pi-1.1.0.zip",
+      "sha256": "7e7f0ccd98e9764a7c25f77b73afaf7cc39e5a53271ac060992fc22460193407",
+      "size": 6218,
+      "date": "2026-11-04",
+      "api": "1",
+      "minAppVersion": "0.1.186",
+      "notes": "Agents: send images pasted into the pane's message"
+    },
+    {
+      "version": "1.0.0",
+      "file": "agent-pi-1.0.0.zip",
+      "sha256": "e37041d1e419f8d323d400759a4a833e8da9ec986e21349e07005e7ae4d0e2c1",
+      "size": 6096,
+      "date": "2026-10-26",
+      "api": "1",
+      "minAppVersion": "0.1.186",
+      "notes": "The three coding agent plugins: Claude, Codex and Pi"
+    }
+  ]
+}

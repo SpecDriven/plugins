@@ -1,0 +1,105 @@
+{
+  "plugin": "agent-claude",
+  "releases": [
+    {
+      "version": "1.19.0",
+      "file": "agent-claude-1.19.0.zip",
+      "sha256": "86c10d00191aac639bc6b852d3dfc5fdcd30a76f5160887df1e6281390f1617a",
+      "size": 512374,
+      "date": "2026-11-12",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Claude's thinking reaches the pane's transcript views"
+    },
+    {
+      "version": "1.18.0",
+      "file": "agent-claude-1.18.0.zip",
+      "sha256": "ae0014864d814507d5d905e1e080dc298f224e9cbee961d6dd672117bd06022d",
+      "size": 512288,
+      "date": "2026-11-10",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "A silent API proxy gets three tries before the turn fails"
+    },
+    {
+      "version": "1.17.0",
+      "file": "agent-claude-1.17.0.zip",
+      "sha256": "0390c4a80dec9bc76f84de26b68c3f6159ad1d09ca0b5c3625068ad64fdd513a",
+      "size": 511798,
+      "date": "2026-11-09",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "A folder switch checks the API proxy again"
+    },
+    {
+      "version": "1.16.2",
+      "file": "agent-claude-1.16.2.zip",
+      "sha256": "2e83d7c14ae5a3704f4f8a4b207a510c6b595987c6c8495599770996dc20d239",
+      "size": 511365,
+      "date": "2026-11-09",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "The pane's choices carry the sign-in, so the header chip shows with no session"
+    },
+    {
+      "version": "1.16.1",
+      "file": "agent-claude-1.16.1.zip",
+      "sha256": "3950d230f6eb4287e99f47d887401812ee640f8e7ec595ad0557e4f7a8bed64d",
+      "size": 511007,
+      "date": "2026-11-09",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Settings calls the second sign-in \"API\", not \"API proxy\""
+    },
+    {
+      "version": "1.16.0",
+      "file": "agent-claude-1.16.0.zip",
+      "sha256": "2231c9059f8b96865befd672dbcd4841e415f32d05c19cbbf6fb16e8ac9fa353",
+      "size": 510983,
+      "date": "2026-11-07",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Report the context window to the pane's session popover"
+    },
+    {
+      "version": "1.15.0",
+      "file": "agent-claude-1.15.0.zip",
+      "sha256": "6625d6b375c86afd39badfb961faf7185c74b7ba3a8f7699c9f5ee20c5511eb0",
+      "size": 509362,
+      "date": "2026-11-07",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Hand agent sessions the MCP servers the app asks for"
+    },
+    {
+      "version": "1.14.0",
+      "file": "agent-claude-1.14.0.zip",
+      "sha256": "a462a781963e302e52b871484f8189fa589a986a694a686851ddb5d4be63757a",
+      "size": 509270,
+      "date": "2026-11-07",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "The account's own models, and the sign-in finishes in the browser"
+    },
+    {
+      "version": "1.13.0",
+      "file": "agent-claude-1.13.0.zip",
+      "sha256": "11d38bb36b1673bc567a45b11ae199b50aa701d3c55cfc8c3c88db2ca1c278e3",
+      "size": 510211,
+      "date": "2026-11-06",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Property tests for Claude's sign-in, and the five bugs they found"
+    },
+    {
+      "version": "1.12.0",
+      "file": "agent-claude-1.12.0.zip",
+      "sha256": "26ff4f6e632c5887278143532d384e48025f59b4b47b18135d67a5935eb7d2db",
+      "size": 509823,
+      "date": "2026-11-05",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "A default model the list does not hold gives way to the list's first"
+    }
+  ]
+}

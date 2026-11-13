@@ -1,11 +1,14 @@
 name: CI
 
 # Every released app reads marketplace.json from this repository's main and
-# installs the plugins' dist/ as committed, so a merge here is a release.
-# This checks each listed plugin inside the app it claims to run in:
+# installs a plugin from it — the newest zip in its release/ folder, or, an
+# app from before release folders, its dist/ as committed — so a merge here
+# is a release. This checks each listed plugin inside the app it claims to
+# run in:
 #
 #   floor    the app at v<minAppVersion>: the plugin's floor is honest
 #   release  the newest app release: what users have; dist/ is up to date
+#            and the newest release zip is the plugin as committed
 #   main     the app's main: a change there that breaks a plugin shows up
 #            before it ships (reported on pull requests, required nightly)
 #
@@ -63,7 +66,11 @@ jobs:
       - name: Install the app
         working-directory: specdriven-app
         run: bun install --ignore-scripts
-      - name: Check marketplace.json
+      # A released zip must not differ from the one main already offers.
+      - name: Fetch main
+        working-directory: plugins
+        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+      - name: Check marketplace.json and the release folders
         working-directory: plugins
         run: bun scripts/check-index.ts
 
@@ -107,6 +114,10 @@ jobs:
         if: matrix.kind == 'release'
         working-directory: plugins
         run: bun scripts/check-dist.ts ${{ matrix.dir }}
+      - name: The newest release is the plugin as committed
+        if: matrix.kind == 'release'
+        working-directory: plugins
+        run: bun scripts/check-release.ts ${{ matrix.dir }}
 
   # One check to require on main: the index and every floor and release row.
   ci:

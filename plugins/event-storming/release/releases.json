@@ -1,0 +1,15 @@
+{
+  "plugin": "event-storming",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "file": "event-storming-1.0.0.zip",
+      "sha256": "394246c4e75d6daa386b609ae36e261d62ac52843dca3c6deac1507a6082bf57",
+      "size": 117660,
+      "date": "2026-09-24",
+      "api": "1",
+      "minAppVersion": "0.1.87",
+      "notes": "The Event Storming plugin: a classic sticky-note wall for exploring a domain"
+    }
+  ]
+}
