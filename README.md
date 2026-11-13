@@ -111,6 +111,28 @@ Releases), which rebuilds `dist/` as `specdriven plugin build` does. The
 scaffold's `.gitignore` leaves `dist/` out; a plugin listed here must not,
 until every app that could install it reads release folders.
 
+## Your own marketplace
+
+A company can keep its plugins in a marketplace of its own, a private
+repository say. Create the repository on its git host first, empty, then in
+the app go to Settings → Plugins → Marketplaces and choose Initialize
+marketplace… with its git url. The app clones it, writes one commit to
+`main` and pushes it, then adds the marketplace to the list. That commit holds:
+
+- `marketplace.json` named after the repository, with no plugins yet
+- a `README.md` for that marketplace (a README the host already put there
+  is kept)
+- `.github/workflows/ci.yml`, `scripts/` and `.gitignore`, copied from this
+  repository as the app's copy of it has them
+
+So the CI and scripts here are also the template every new marketplace
+starts from: they must keep working with no plugins listed, which is why the
+plugin job is skipped when the CI matrix is empty. A marketplace initialized
+earlier keeps the copies it got; take later changes over by hand.
+
+The SpecDriven marketplace (this repository) is always on the list and
+cannot be removed; every other marketplace can.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
