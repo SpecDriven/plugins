@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// src/host.ts
+// plugins/agent-claude/src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44571,20 +44571,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// src/auth.ts
+// plugins/agent-claude/src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// src/binary.ts
+// plugins/agent-claude/src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// src/binaries.json
+// plugins/agent-claude/src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44599,7 +44599,7 @@ var binaries_default = {
   }
 };
 
-// src/binary.ts
+// plugins/agent-claude/src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44727,7 +44727,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// src/cli.ts
+// plugins/agent-claude/src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44739,7 +44739,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// src/settings.ts
+// plugins/agent-claude/src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44850,7 +44850,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// src/auth.ts
+// plugins/agent-claude/src/auth.ts
 var log = getLogger("agent-claude");
 
 class ClaudeAuthError extends Error {
@@ -45208,7 +45208,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// src/modelMenu.ts
+// plugins/agent-claude/src/modelMenu.ts
 function narrowModels(all, listed) {
   if (listed.length === 0)
     return [...all];
@@ -45225,7 +45225,7 @@ function inList(model, all, listed) {
   return narrowModels(all, listed).some((m2) => m2.value === model || m2.resolvedModel === model);
 }
 
-// src/contextUsage.ts
+// plugins/agent-claude/src/contextUsage.ts
 var KINDS = new Set(["used", "buffer", "free", "deferred"]);
 function categoryId(category) {
   if (category.id)
@@ -45302,7 +45302,7 @@ function contextWindowOf(modelUsage, model) {
   return sizes.length ? Math.max(...sizes) : null;
 }
 
-// src/provider.ts
+// plugins/agent-claude/src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -46160,7 +46160,7 @@ function mcpServerConfigs(servers) {
   return Object.fromEntries(servers.map((s) => [s.name, { type: "stdio", command: s.command, args: [...s.args], env: { ...s.env } }]));
 }
 
-// src/accountModels.ts
+// plugins/agent-claude/src/accountModels.ts
 function effortsOf(row) {
   if (row.supportsEffort === false)
     return [];
@@ -46261,7 +46261,7 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// src/proxyModels.ts
+// plugins/agent-claude/src/proxyModels.ts
 var PROXY_MODELS_TIMEOUT_MS = 1e4;
 var MAX_PROXY_MODELS = 200;
 function proxyModelsOf(rows, into = []) {
@@ -46312,7 +46312,7 @@ async function fetchProxyModels(url, token, fetchFn = fetch, timeoutMs = PROXY_M
   return models;
 }
 
-// src/models.ts
+// plugins/agent-claude/src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var CLAUDE_MODELS_FILE = ".specdriven/claude-models.json";
@@ -46356,7 +46356,7 @@ function withReportedModels(provider, offered) {
   });
 }
 
-// src/reconnect.ts
+// plugins/agent-claude/src/reconnect.ts
 var RECONNECT_TRIES = 3;
 var RECONNECT_PAUSE_MS = 1000;
 async function reconnectProxy(cwd, deps) {
@@ -46397,7 +46397,7 @@ function withReconnect(provider, deps) {
   });
 }
 
-// src/host.ts
+// plugins/agent-claude/src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var SIGN_IN_TTL_MS = 30000;
 var TOKEN_STORE = "token";
@@ -46637,5 +46637,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=1FAD3E3B54929DCD64756E2164756E21
+//# debugId=B5B45956F8A19D1564756E2164756E21
 //# sourceMappingURL=host.js.map

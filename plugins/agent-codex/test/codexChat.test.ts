@@ -28,6 +28,7 @@ import {
   setCodexSpawn,
 } from "../src/codexChat";
 import type { CodexSpawnOptions } from "../src/codexChat";
+import { ACCOUNT_ARGS, setLoginStatus } from "../src/auth";
 import { setCodexAvailability } from "../src/cli";
 import { codexMcpArgs, tomlString } from "../src/mcpConfig";
 import { mountPlugin, quietProfile } from "./app";
@@ -481,6 +482,10 @@ beforeEach(async () => {
   fakes = [];
   refuseThread = false;
   setCodexAvailability(() => true);
+  // Nothing chosen and nothing in Codex's own config is the account
+  // sign-in: a ChatGPT account is signed in (test/preload.ts gives the run
+  // an empty Codex home).
+  setLoginStatus(async () => ({ loggedIn: true, method: "chatgpt", email: "pat@example.com" }));
   setCodexSpawn((options) => {
     const fake = new FakeCodex(options);
     fakes.push(fake);
@@ -497,6 +502,7 @@ afterEach(async () => {
   await unmount();
   reloader.stop();
   setCodexAvailability(null);
+  setLoginStatus(null);
   setCodexSpawn(null);
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
@@ -568,7 +574,8 @@ test("a codex session spawns `codex app-server` on the work dir and is ready onc
   expect(meta.permissionMode).toBe("default");
   expect(fakes).toHaveLength(1);
   const codex = fakes[0]!;
-  expect(codex.options.args).toEqual(["app-server"]);
+  // The account sign-in, as `-c` overrides for this process alone.
+  expect(codex.options.args).toEqual(["app-server", ...ACCOUNT_ARGS]);
   expect(codex.options.cwd).toBe(data);
 
   const ready = await untilStatus(meta.id, "idle");
@@ -601,6 +608,24 @@ test("a codex session spawns `codex app-server` on the work dir and is ready onc
     (r) => r?.agentSessionId === "thread-1",
   );
   expect(record).toMatchObject({ agent: "codex", cwd: data, dataRepo: data });
+});
+
+test("a session starts on the model Settings → Codex names, and reports the sign-in it started under", async () => {
+  const saved = await api("/api/codex/settings", "PUT", { defaultModel: "gpt-test-mini" });
+  expect(saved.status).toBe(200);
+  const { id, codex } = await idleCodexSession();
+  expect(codex.sent("thread/start")!.params).toEqual({
+    cwd: data,
+    approvalPolicy: "on-request",
+    sandbox: "workspace-write",
+    model: "gpt-test-mini",
+  });
+  // The header's chip: the ChatGPT account the session was started under.
+  expect((await snapshot(id)).meta.account).toEqual({
+    billing: "plan",
+    label: "ChatGPT account",
+    detail: "ChatGPT account · pat@example.com",
+  });
 });
 
 test("a turn goes to Codex as turn/start and its items stream into the log", async () => {

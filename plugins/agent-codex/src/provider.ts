@@ -5,7 +5,10 @@
 // permission cards answer. Codex has no permission modes but an approval
 // policy and a sandbox; the pane's modes map onto those (codexPolicy) and
 // travel with every turn. An AgentProvider (src/plugins/host/agents.ts);
-// its one-shot turns run `codex exec` instead (src/oneShot.ts).
+// its one-shot turns run `codex exec` instead (src/oneShot.ts). How it
+// signs in — a ChatGPT account or the API — is Settings → Codex's choice
+// (src/auth.ts), handed to every Codex as its launch; the models it offers
+// are the sign-in's (src/models.ts).
 //
 // Node APIs only (src/server/run.ts): this module also runs under Electron.
 
@@ -13,12 +16,17 @@ import { AgentError } from "@specdriven/host";
 import type {
   AgentHost,
   AgentSession,
+  ChatAccount,
+  OneShotRequest,
+  OneShotResult,
   PermissionDecision,
   PermissionMode,
   PermissionOutcome,
   PermissionSuggestion,
 } from "@specdriven/host";
+import { CodexAuthError, plainLaunch, type CodexLaunch } from "./auth";
 import { CODEX_BIN, codexAvailable } from "./cli";
+import { narrowModels, type CodexModel } from "./modelMenu";
 import { codexOneShot } from "./oneShot";
 import {
   CODEX_CLIENT_INFO,
@@ -37,7 +45,8 @@ import {
 } from "./codexChat";
 import type { CodexParams, CodexStreamContext, RpcId } from "./codexChat";
 import { codexMcpArgs } from "./mcpConfig";
-import type { PaneHost, PaneProvider, PaneStartOptions, PastedImage } from "./paneContract";
+import type { AgentChoices, AgentDefaultsPatch, PaneHost, PaneProvider, PaneStartOptions, PastedImage } from "./paneContract";
+import { DEFAULT_SETTINGS, type CodexSettingsValues } from "./settings";
 
 /** The refusal when no `codex` is on PATH. */
 export const CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
@@ -69,6 +78,42 @@ function sessionRule(toolName: string, ruleContent: string): PermissionSuggestio
 
 const DENIED_DEFAULT = "Denied in SpecDriven";
 
+const LOCAL_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/;
+
+/** What Settings → Codex has chosen, as describeSignIn reads it. */
+export interface SignInChoice {
+  mode: "login" | "api";
+  /** The address an api-mode launch calls; null when none is set anywhere. */
+  apiUrl: string | null;
+  /** `codex login status` under the account sign-in; null in api mode. */
+  login: { loggedIn: boolean; email: string | null } | null;
+}
+
+/**
+ * The sign-in a session starts under, for the pane header's chip
+ * (specs/agents/agent-pane.feature.md "The pane header says whether the
+ * agent spends an account or the API"): the API at the address Settings
+ * names, or the ChatGPT account Codex is signed in to.
+ */
+export function describeSignIn(choice: SignInChoice): ChatAccount {
+  if (choice.mode === "api") {
+    let endpoint: URL | undefined;
+    try {
+      endpoint = choice.apiUrl ? new URL(choice.apiUrl) : undefined;
+    } catch {
+      // Settings normalizes the address; a bad one reads as none set.
+    }
+    if (!endpoint) return { billing: "api", label: "API", detail: "API · as Codex's own config has it" };
+    const label = LOCAL_HOSTS.test(endpoint.hostname) ? "LOCAL" : endpoint.hostname;
+    return { billing: "api", label: `API:${label}`, detail: `API calls go to ${endpoint.host}` };
+  }
+  if (choice.login?.loggedIn) {
+    const who = choice.login.email ? ` · ${choice.login.email}` : "";
+    return { billing: "plan", label: "ChatGPT account", detail: `ChatGPT account${who}` };
+  }
+  return { billing: "none", label: "Not logged in", detail: "Sign in with your ChatGPT account in Settings → Codex." };
+}
+
 class CodexSession implements AgentSession {
   client: CodexClient | null = null;
   private readonly stream: CodexStreamContext = newCodexStream();
@@ -82,12 +127,19 @@ class CodexSession implements AgentSession {
   /** The model the thread runs on, and the last context count shown. */
   private model: string | null = null;
   private lastCount: number | null = null;
+  /** The model the pane switched to since the thread started: it goes
+      with the next turn, and Codex keeps it for the turns after. */
+  private nextModel: string | null = null;
 
   constructor(
     private readonly host: AgentHost,
     private readonly name: string,
     private readonly cwd: string,
     mode: PermissionMode,
+    /** The model the thread starts on; null is Codex's own. */
+    private readonly startModel: string | null = null,
+    /** The sign-in the session was started under, for the header's chip. */
+    private readonly account: ChatAccount | null = null,
   ) {
     this.mode = mode;
   }
@@ -123,6 +175,7 @@ class CodexSession implements AgentSession {
       cwd: this.cwd,
       approvalPolicy: policy.approvalPolicy,
       sandbox: policy.sandbox,
+      ...(this.startModel ? { model: this.startModel } : {}),
     });
     if (this.final) return;
     if (!started.ok) return this.failed(started.error);
@@ -144,7 +197,11 @@ class CodexSession implements AgentSession {
     // Named after the session, so `codex resume` lists it by that name.
     void client.request("thread/name/set", { threadId: info.threadId, name: this.name });
     this.model = info.model ?? null;
-    this.host.ready({ agentSessionId: info.threadId, ...(info.model ? { model: info.model } : {}) });
+    this.host.ready({
+      agentSessionId: info.threadId,
+      ...(info.model ? { model: info.model } : {}),
+      ...(this.account ? { account: this.account } : {}),
+    });
     if (prompt || images?.length) {
       try {
         await this.send(prompt ?? "", images);
@@ -167,9 +224,14 @@ class CodexSession implements AgentSession {
       input: codexTextInput(text, images?.map((image) => image.path)),
       approvalPolicy: policy.approvalPolicy,
       sandboxPolicy: codexSandboxPolicy(policy.sandbox),
+      ...(this.nextModel ? { model: this.nextModel } : {}),
     });
     if (this.final) return;
     if (!res.ok) throw new Error(`Codex refused the turn: ${res.error}`);
+    if (this.nextModel) {
+      this.model = this.nextModel;
+      this.nextModel = null;
+    }
     const turn = rec(res.result.turn);
     const turnId = turn ? str(turn.id) : null;
     if (turnId && this.stream.turnId === null) this.stream.turnId = turnId;
@@ -189,6 +251,15 @@ class CodexSession implements AgentSession {
     if (this.host.status() === "starting") throw new AgentError(409, "Codex is still starting");
     this.mode = mode;
     if (this.host.busy()) this.host.note("info", "api", "The new mode applies from the next turn.");
+  }
+
+  /** The pane picked another model: Codex takes it with a turn, and keeps
+      it for the turns after. Null is the model the thread started on. */
+  async setModel(model: string | null): Promise<void> {
+    if (this.host.status() === "starting") throw new AgentError(409, "Codex is still starting");
+    const next = model ?? this.startModel;
+    this.nextModel = next && next !== this.model ? next : null;
+    if (this.host.busy()) this.host.note("info", "api", "The new model applies from the next turn.");
   }
 
   close(): void {
@@ -383,49 +454,143 @@ class CodexSession implements AgentSession {
   }
 }
 
-export const codexProvider: PaneProvider = {
-  id: "codex",
-  label: "Codex",
-  description: "OpenAI's Codex CLI, with permission cards for commands and file changes",
-  rank: 20,
-  cli: CODEX_BIN,
-  available: codexAvailable,
-  missingMessage: CODEX_MISSING,
-  capabilities: {
-    permissionModes: ["auto", "default", "acceptEdits", "plan", "bypassPermissions"],
-    canInterrupt: true,
-    canChangeModeMidSession: true,
-    hasAccount: false,
-    rememberPermissions: "session",
-    oneShot: true,
-    images: true,
-    contextUsage: "totals",
-  },
-  defaultPermissionMode: "default",
-  loginHint: {
-    text: "The Codex CLI is not signed in on this machine: run the command in a terminal, then start a new session.",
-    command: "codex login",
-  },
-  async start(opts: PaneStartOptions): Promise<AgentSession> {
-    const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode);
-    session.client = new CodexClient({
-      cwd: opts.cwd,
+/** What the host half hands the provider (src/host.ts); with none of it,
+    Codex runs on its own config and sign-in and offers no model menu. */
+export interface CodexProviderOptions {
+  /** The launch Settings → Codex's sign-in gives a Codex (src/auth.ts);
+      it rejects with a CodexAuthError when that sign-in is not there. */
+  launch?: () => Promise<CodexLaunch>;
+  /** The sign-in a new session would start under (describeSignIn). */
+  signIn?: () => Promise<ChatAccount>;
+  /** The plugin's settings as they stand; default: the defaults. */
+  settings?: () => Promise<CodexSettingsValues>;
+  /** The names the data repo lists for Codex (src/models.ts), which narrow
+      the menus to those models; default: none, so nothing is narrowed. */
+  listedModels?: () => Promise<string[]>;
+  /** The models the sign-in offers (src/models.ts): the API's
+      GET <address>/models, or Codex's own for a ChatGPT account. */
+  offeredModels?: () => Promise<CodexModel[]>;
+  /** Write a patch to the plugin's settings section; default: nothing is kept. */
+  saveSettings?: (patch: Record<string, unknown>) => Promise<void>;
+}
+
+/** The Codex provider; the host half hands it the plugin's settings and sign-in. */
+export function createCodexProvider(options: CodexProviderOptions = {}): PaneProvider {
+  const settings = options.settings ?? (async () => DEFAULT_SETTINGS);
+  const listedModels = options.listedModels ?? (async () => []);
+  const offered = async () => (await options.offeredModels?.().catch(() => [] as CodexModel[])) ?? [];
+  /** The launch, with a sign-in that is not there as the session's refusal. */
+  const launch = async (): Promise<CodexLaunch> => {
+    if (!options.launch) return plainLaunch();
+    try {
+      return await options.launch();
+    } catch (e) {
+      if (e instanceof CodexAuthError) throw new AgentError(e.status, e.message);
+      throw e;
+    }
+  };
+  /** No model asked for: the default Settings names while the data repo's
+      list for Codex holds it (or lists nothing), else the first that list
+      names, else none — Codex's own. */
+  const defaultModel = async (): Promise<string | null> => {
+    const [own, listed] = [await settings(), await listedModels()];
+    if (own.defaultModel && (listed.length === 0 || listed.includes(own.defaultModel))) return own.defaultModel;
+    return listed[0] ?? null;
+  };
+  const menus = options.offeredModels !== undefined;
+  return {
+    id: "codex",
+    label: "Codex",
+    description: "OpenAI's Codex CLI, with permission cards for commands and file changes",
+    rank: 20,
+    cli: CODEX_BIN,
+    available: codexAvailable,
+    missingMessage: CODEX_MISSING,
+    capabilities: {
+      permissionModes: ["auto", "default", "acceptEdits", "plan", "bypassPermissions"],
+      canInterrupt: true,
+      canChangeModeMidSession: true,
+      hasAccount: options.signIn !== undefined,
+      rememberPermissions: "session",
+      oneShot: true,
+      ...(menus ? { canChangeModelMidSession: true } : {}),
+      images: true,
+      contextUsage: "totals",
+    },
+    defaultPermissionMode: "default",
+    loginHint: {
+      text: "Codex is not signed in on this machine: sign in with your ChatGPT account, or enter the API's address and key, in Settings → Codex.",
+    },
+    async start(opts: PaneStartOptions): Promise<AgentSession> {
+      // The sign-in Settings chose, read afresh for every session: the
+      // `-c` overrides and the environment that carry it (src/auth.ts).
+      const run = await launch();
+      const account = await options.signIn?.().catch(() => undefined);
+      const model = opts.model ?? (menus ? await defaultModel() : null);
+      const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode, model, account ?? null);
       // The MCP servers the app asks for (AgentStartOptions.mcpServers):
       // the Confluence server while a wiki token is saved.
-      ...(opts.mcpServers?.length ? { extraArgs: codexMcpArgs(opts.mcpServers) } : {}),
-      onNotification: (method, params) => session.notification(method, params),
-      onServerRequest: (id, method, params) => session.request(id, method, params),
-      onStderr: session.stderr,
-      onExit: (code, error) => session.exited(code, error),
-    });
-    opts.signal.addEventListener("abort", () => session.close(), { once: true });
-    // The prompt is the first turn, once the thread is up; the core shows
-    // it in the transcript straight away, and the composer stays closed
-    // until Codex has taken it.
-    void session.ready(opts.prompt, opts.images);
-    return session;
-  },
-  // The app's one-shot turns (an estimate, say) go through `codex exec`,
-  // read-only and without a session: src/oneShot.ts.
-  oneShot: codexOneShot,
-};
+      const extraArgs = [...run.args, ...(opts.mcpServers?.length ? codexMcpArgs(opts.mcpServers) : [])];
+      session.client = new CodexClient({
+        cwd: opts.cwd,
+        ...(extraArgs.length ? { extraArgs } : {}),
+        ...(options.launch ? { env: run.env } : {}),
+        onNotification: (method, params) => session.notification(method, params),
+        onServerRequest: (id, method, params) => session.request(id, method, params),
+        onStderr: session.stderr,
+        onExit: (code, error) => session.exited(code, error),
+      });
+      opts.signal.addEventListener("abort", () => session.close(), { once: true });
+      // The prompt is the first turn, once the thread is up; the core shows
+      // it in the transcript straight away, and the composer stays closed
+      // until Codex has taken it.
+      void session.ready(opts.prompt, opts.images);
+      return session;
+    },
+    // The app's one-shot turns (an estimate, say) go through `codex exec`,
+    // read-only and without a session: src/oneShot.ts.
+    oneShot: options.launch
+      ? async (req: OneShotRequest): Promise<OneShotResult> => {
+          let run: CodexLaunch;
+          try {
+            run = await launch();
+          } catch (e) {
+            return { text: (e as Error).message, isError: true };
+          }
+          return codexOneShot(req, { args: run.args, env: run.env, model: await defaultModel() });
+        }
+      : codexOneShot,
+    ...(menus
+      ? {
+          /** The pane's model menu: every model the sign-in offers — the
+              API's own list, or Codex's for a ChatGPT account — narrowed to
+              the names the data repo lists for Codex when it lists any; and
+              what a new session starts on. */
+          async choices(): Promise<AgentChoices> {
+            const models = narrowModels(await offered(), await listedModels()).map((m) => ({
+              value: m.value,
+              displayName: m.displayName,
+              ...(m.description ? { description: m.description } : {}),
+            }));
+            const account = await options.signIn?.().catch(() => undefined);
+            return { models, model: await defaultModel(), effort: null, ...(account ? { account } : {}) };
+          },
+          /** A pick in the pane becomes Settings → Codex's default. */
+          async setDefaults(patch: AgentDefaultsPatch): Promise<void> {
+            if (patch.model === undefined) return;
+            if (!options.saveSettings) throw new AgentError(409, "Codex keeps no defaults here");
+            await options.saveSettings({ defaultModel: patch.model });
+          },
+          /** Every model the sign-in offers, for the app's check of the
+              data repo's list; null when it offers none. */
+          async reportedModels(): Promise<string[] | null> {
+            const models = await offered();
+            return models.length > 0 ? models.map((m) => m.value) : null;
+          },
+        }
+      : {}),
+  };
+}
+
+/** Codex on its own config and sign-in, as before Settings → Codex. */
+export const codexProvider: PaneProvider = createCodexProvider();

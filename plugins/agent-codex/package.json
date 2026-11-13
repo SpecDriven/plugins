@@ -1,12 +1,13 @@
 {
   "name": "@specdriven/plugin-agent-codex",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "license": "Apache-2.0",
-  "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes",
+  "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes, and its sign-in (your ChatGPT account or the API) in Settings",
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./dist/host.js"
+    ".": "./dist/host.js",
+    "./client": "./dist/client.js"
   },
   "scripts": {
     "build": "specdriven plugin build",
@@ -17,20 +18,29 @@
     "id": "agent-codex",
     "api": "1",
     "displayName": "Codex agent",
-    "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes",
+    "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes, and its sign-in (your ChatGPT account or the API) in Settings",
     "host": "./dist/host.js",
+    "client": "./dist/client.js",
     "src": {
-      "host": "./src/host.ts"
+      "host": "./src/host.ts",
+      "client": "./src/client.tsx"
     },
     "minAppVersion": "0.1.196",
     "defaultEnabled": true,
     "autoEnable": true,
     "permissions": [
-      "process:spawn"
+      "process:spawn",
+      "settings:write",
+      "secrets"
     ]
+  },
+  "peerDependencies": {
+    "react": "^19"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
+    "@types/react": "^19.2.17",
+    "react": "^19.2.7",
     "typescript": "^5"
   }
 }

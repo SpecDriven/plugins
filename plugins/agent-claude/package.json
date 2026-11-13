@@ -1,8 +1,8 @@
 {
   "name": "@specdriven/plugin-agent-claude",
-  "version": "1.19.0",
+  "version": "1.19.1",
   "license": "Apache-2.0",
-  "description": "Claude Code in the coding agent pane, with its sign-in and proxy settings",
+  "description": "Claude Code in the coding agent pane, with its sign-in (your Claude account or the API) in Settings",
   "type": "module",
   "private": true,
   "exports": {
@@ -18,7 +18,7 @@
     "id": "agent-claude",
     "api": "1",
     "displayName": "Claude agent",
-    "description": "Claude Code in the coding agent pane, with its sign-in and proxy settings",
+    "description": "Claude Code in the coding agent pane, with its sign-in (your Claude account or the API) in Settings",
     "host": "./dist/host.js",
     "client": "./dist/client.js",
     "src": {

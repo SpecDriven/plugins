@@ -25,9 +25,17 @@ const KILL_GRACE_MS = 3000;
 const STDERR_TAIL = 5;
 
 /** The `codex exec` argv for one turn; the prompt itself comes on stdin (`-`). */
-export function codexExecArgs(cwd: string, outFile: string, schemaFile: string | null, model?: string): string[] {
+export function codexExecArgs(
+  cwd: string,
+  outFile: string,
+  schemaFile: string | null,
+  model?: string,
+  /** The sign-in's `-c` overrides (src/auth.ts launchFor). */
+  overrides: string[] = [],
+): string[] {
   return [
     "exec",
+    ...overrides,
     "--ephemeral",
     "--skip-git-repo-check",
     "-s",
@@ -114,7 +122,15 @@ function readableError(raw: string): string {
   return text.length > 400 ? `${text.slice(0, 400)}…` : text;
 }
 
-export async function codexOneShot(req: OneShotRequest): Promise<OneShotResult> {
+/** What a one-shot turn is started with: the sign-in's overrides and
+    environment (src/auth.ts), and the model when the request names none. */
+export interface OneShotLaunch {
+  args: string[];
+  env: Record<string, string | undefined>;
+  model?: string | null;
+}
+
+export async function codexOneShot(req: OneShotRequest, launch?: OneShotLaunch): Promise<OneShotResult> {
   if (req.signal?.aborted) return { text: "Codex was stopped", isError: true };
   const dir = await mkdtemp(join(tmpdir(), "specdriven-codex-oneshot-"));
   try {
@@ -124,7 +140,8 @@ export async function codexOneShot(req: OneShotRequest): Promise<OneShotResult> 
       schemaFile = join(dir, "schema.json");
       await writeFile(schemaFile, JSON.stringify(strictSchema(req.schema)), "utf8");
     }
-    const outcome = await runExec(req, codexExecArgs(req.cwd, outFile, schemaFile, req.model));
+    const model = req.model ?? launch?.model ?? undefined;
+    const outcome = await runExec(req, codexExecArgs(req.cwd, outFile, schemaFile, model, launch?.args), launch?.env ?? process.env);
     if (outcome.error) {
       return { text: withTail(`Could not start Codex: ${outcome.error.message}`, outcome.stderrTail), isError: true };
     }
@@ -159,7 +176,7 @@ function parseJson(text: string): unknown {
  * Spawn `codex exec`, feed it the prompt, and wait for it to go — on its
  * own, or killed when the request's time is up or its signal aborts.
  */
-function runExec(req: OneShotRequest, args: string[]): Promise<ExecOutcome> {
+function runExec(req: OneShotRequest, args: string[], env: Record<string, string | undefined>): Promise<ExecOutcome> {
   return new Promise<ExecOutcome>((resolve) => {
     let stderr: string[] = [];
     let stderrRest = "";
@@ -186,7 +203,7 @@ function runExec(req: OneShotRequest, args: string[]): Promise<ExecOutcome> {
       bin: which(CODEX_BIN) ?? CODEX_BIN,
       args,
       cwd: req.cwd,
-      env: process.env,
+      env,
       // The JSONL event stream (--json): the answer is in the out file, but
       // an API refusal (a schema it rejects, a model it lacks) is reported
       // only here, as an `error` event, before Codex exits 1.

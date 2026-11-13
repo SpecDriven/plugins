@@ -158,8 +158,8 @@ export interface SignInChoice {
 /**
  * The sign-in a new session would start under, before any session has
  * reported one (specs/agents/agent-pane.feature.md "The pane header says
- * whether the agent spends an account or the API"): the API through the
- * proxy Settings names, or the Claude account Claude Code is signed in to.
+ * whether the agent spends an account or the API"): the API at the
+ * address Settings names, or the Claude account Claude Code is signed in to.
  * A session's own account answer (describeAccount) replaces it once it
  * comes.
  */
