@@ -4,7 +4,14 @@
 // @specdriven/host so the plugin still type-checks against the older apps
 // it runs in — they lack these types and simply never call these methods.
 
-import type { AgentHost, AgentProvider, AgentStartOptions, ChatAccount } from "@specdriven/host";
+import type {
+  AgentHost,
+  AgentOutput,
+  AgentProvider,
+  AgentStartOptions,
+  AssistantBlock,
+  ChatAccount,
+} from "@specdriven/host";
 import type { ClaudeEffort } from "./settings";
 
 export interface AgentModelOption {
@@ -60,6 +67,8 @@ export type PaneCapabilities = AgentProvider["capabilities"] & {
   effort?: boolean;
   images?: boolean;
   contextUsage?: "breakdown" | "totals";
+  /** Whether the agent reports its thinking (the transcript views, below). */
+  thinking?: boolean;
 };
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
@@ -104,3 +113,29 @@ export type ContextDetail = "summary" | "full";
 
 /** The host as an app with the context meter lends it. */
 export type PaneHost = AgentHost & { context?(usage: Omit<ChatContextUsage, "at"> & { at?: string }): void };
+
+// --- The transcript views' thinking (SpecDriven after 0.1.267) -------------
+//
+// The pane's Thinking and Verbose transcript views show what the agent
+// reasoned before it answered: the plugin passes it on as it streams
+// (`thinking_delta`) and then whole, as a `thinking` block of the message it
+// belongs to. A delta may also name the subagent call it streams under. An
+// older app knows neither the event nor the block and ignores both, in its
+// log and in its pane, so they are sent whatever the app.
+
+/** What Claude thought, whole: one block of an assistant message. */
+export interface ThinkingBlock {
+  type: "thinking";
+  text: string;
+}
+
+/** A block as the plugin sends it: the app's own, or thinking. */
+export type PaneBlock = AssistantBlock | ThinkingBlock;
+
+/** What the plugin puts in a session's log: the app's own events, with the
+    thinking an app from before the transcript views has no type for. */
+export type PaneOutput =
+  | Exclude<AgentOutput, { kind: "assistant" | "text_delta" }>
+  | { kind: "text_delta"; messageId: string; index: number; text: string; parentToolUseId?: string | null }
+  | { kind: "thinking_delta"; messageId: string; index: number; text: string; parentToolUseId?: string | null }
+  | { kind: "assistant"; messageId: string; turn: number; blocks: PaneBlock[]; parentToolUseId: string | null };

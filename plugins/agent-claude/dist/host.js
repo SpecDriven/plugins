@@ -16,7 +16,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../plugins-api-retries/plugins/agent-claude/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
 var exports_sdk = {};
 __export(exports_sdk, {
   tool: () => IYe,
@@ -44529,7 +44529,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
   ant = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 });
 
-// ../plugins-api-retries/plugins/agent-claude/src/host.ts
+// src/host.ts
 import { homedir as homedir3 } from "node:os";
 
 // specdriven-shim:@specdriven/host
@@ -44571,20 +44571,20 @@ var which = m.which;
 var withSpan = m.withSpan;
 var writeTextFile = m.writeTextFile;
 
-// ../plugins-api-retries/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
-// ../plugins-api-retries/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-// ../plugins-api-retries/plugins/agent-claude/src/binaries.json
+// src/binaries.json
 var binaries_default = {
   version: "0.3.261",
   packages: {
@@ -44599,7 +44599,7 @@ var binaries_default = {
   }
 };
 
-// ../plugins-api-retries/plugins/agent-claude/src/binary.ts
+// src/binary.ts
 var SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 var BINARY_PLATFORMS = [
   "darwin-arm64",
@@ -44727,7 +44727,7 @@ function tarEntry(tar, wanted) {
   return null;
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/cli.ts
+// src/cli.ts
 var CLAUDE_BIN = "claude";
 var probe = null;
 function claudeExecutable() {
@@ -44739,7 +44739,7 @@ function claudeAvailable() {
   return claudeExecutable() !== null;
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var CLAUDE_LEGACY_KEYS = ["claudeAuth", "claudeProxyUrl", "agentFirstResponseSeconds"];
 var ADOPTED_KEY = "adopted";
 var CLAUDE_AUTH_MODES = ["login", "proxy"];
@@ -44850,7 +44850,7 @@ function claudeSettingsPatch(body) {
   return { patch };
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/auth.ts
+// src/auth.ts
 var log = getLogger("agent-claude");
 
 class ClaudeAuthError extends Error {
@@ -45208,7 +45208,7 @@ async function checkProxy(url, token, fetchFn = fetch, timeoutMs = 5000) {
   }
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/modelMenu.ts
+// src/modelMenu.ts
 function narrowModels(all, listed) {
   if (listed.length === 0)
     return [...all];
@@ -45225,7 +45225,7 @@ function inList(model, all, listed) {
   return narrowModels(all, listed).some((m2) => m2.value === model || m2.resolvedModel === model);
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/contextUsage.ts
+// src/contextUsage.ts
 var KINDS = new Set(["used", "buffer", "free", "deferred"]);
 function categoryId(category) {
   if (category.id)
@@ -45302,7 +45302,7 @@ function contextWindowOf(modelUsage, model) {
   return sizes.length ? Math.max(...sizes) : null;
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/provider.ts
+// src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
   vertex: "Google Vertex AI",
@@ -45411,6 +45411,13 @@ class InputQueue {
     }
   }
 }
+function askForThinking(query) {
+  if (!query.setMaxThinkingTokens)
+    return;
+  query.setMaxThinkingTokens(null, "summarized").catch(() => {
+    return;
+  });
+}
 var queryFactory = null;
 var sdkFactory = async ({ prompt, options }) => {
   const { query } = await Promise.resolve().then(() => (init_sdk(), exports_sdk));
@@ -45471,13 +45478,26 @@ function mapSdkMessage(msg, ctx, stream = { messageId: null }) {
         stream.messageId = ev2.message.id;
         return [];
       }
+      const parent = msg.parent_tool_use_id ? { parentToolUseId: msg.parent_tool_use_id } : {};
       if (ev2.type === "content_block_delta" && ev2.delta.type === "text_delta") {
         return [
           {
             kind: "text_delta",
             messageId: stream.messageId ?? "",
             index: ev2.index,
-            text: ev2.delta.text
+            text: ev2.delta.text,
+            ...parent
+          }
+        ];
+      }
+      if (ev2.type === "content_block_delta" && ev2.delta.type === "thinking_delta" && ev2.delta.thinking) {
+        return [
+          {
+            kind: "thinking_delta",
+            messageId: stream.messageId ?? "",
+            index: ev2.index,
+            text: ev2.delta.thinking,
+            ...parent
           }
         ];
       }
@@ -45490,6 +45510,9 @@ function mapSdkMessage(msg, ctx, stream = { messageId: null }) {
           blocks.push({ type: "text", text: block.text });
         else if (block.type === "tool_use") {
           blocks.push({ type: "tool_use", id: block.id, name: block.name, input: block.input });
+        } else if (block.type === "thinking") {
+          if (block.thinking.trim())
+            blocks.push({ type: "thinking", text: block.thinking });
         }
       }
       const events = [];
@@ -45658,6 +45681,9 @@ class ClaudeSession {
       throw new AgentError(409, "This Claude Code cannot switch models mid-session");
     await this.query.setModel(model ?? undefined);
     this.model = model;
+  }
+  emit(body) {
+    this.host.emit(body);
   }
   async setEffort(effort) {
     if (this.host.status() === "starting")
@@ -45847,7 +45873,7 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
         return;
       }
       for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream))
-        this.host.emit(body);
+        this.emit(body);
       this.host.update({
         agentSessionId: msg.session_id,
         model: msg.model,
@@ -45875,7 +45901,7 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
         this.lastWindowTokens = tokens;
     }
     for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream))
-      this.host.emit(body);
+      this.emit(body);
     if (msg.type === "result") {
       this.contextWindow = contextWindowOf(msg.modelUsage, this.model) ?? this.contextWindow;
       this.host.turnEnded();
@@ -45997,7 +46023,8 @@ function createClaudeProvider(options = {}) {
       canChangeModelMidSession: true,
       effort: true,
       images: true,
-      contextUsage: "breakdown"
+      contextUsage: "breakdown",
+      thinking: true
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -46032,6 +46059,7 @@ function createClaudeProvider(options = {}) {
           stderr: session.stderr
         };
         const query = await factory()({ prompt: input, options: sdkOptions });
+        askForThinking(query);
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
       session.effort = opts.effort ?? (await settings()).defaultEffort;
@@ -46132,7 +46160,7 @@ function mcpServerConfigs(servers) {
   return Object.fromEntries(servers.map((s) => [s.name, { type: "stdio", command: s.command, args: [...s.args], env: { ...s.env } }]));
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/accountModels.ts
+// src/accountModels.ts
 function effortsOf(row) {
   if (row.supportsEffort === false)
     return [];
@@ -46233,7 +46261,7 @@ function forgetAccountModels() {
   pending2 = null;
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/proxyModels.ts
+// src/proxyModels.ts
 var PROXY_MODELS_TIMEOUT_MS = 1e4;
 var MAX_PROXY_MODELS = 200;
 function proxyModelsOf(rows, into = []) {
@@ -46284,7 +46312,7 @@ async function fetchProxyModels(url, token, fetchFn = fetch, timeoutMs = PROXY_M
   return models;
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/models.ts
+// src/models.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 var CLAUDE_MODELS_FILE = ".specdriven/claude-models.json";
@@ -46328,7 +46356,7 @@ function withReportedModels(provider, offered) {
   });
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/reconnect.ts
+// src/reconnect.ts
 var RECONNECT_TRIES = 3;
 var RECONNECT_PAUSE_MS = 1000;
 async function reconnectProxy(cwd, deps) {
@@ -46369,7 +46397,7 @@ function withReconnect(provider, deps) {
   });
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/host.ts
+// src/host.ts
 var DEMO_REFUSAL = "Claude sign-in is disabled in demo mode";
 var SIGN_IN_TTL_MS = 30000;
 var TOKEN_STORE = "token";
@@ -46609,5 +46637,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=F5866153E47ECCFE64756E2164756E21
+//# debugId=1FAD3E3B54929DCD64756E2164756E21
 //# sourceMappingURL=host.js.map

@@ -65,7 +65,7 @@ var useSyncExternalStore = m2.useSyncExternalStore;
 var useTransition = m2.useTransition;
 var version = m2.version;
 
-// ../plugins-api-retries/plugins/agent-claude/src/modelMenu.ts
+// src/modelMenu.ts
 function narrowModels(all, listed) {
   if (listed.length === 0)
     return [...all];
@@ -82,7 +82,7 @@ function inList(model, all, listed) {
   return narrowModels(all, listed).some((m3) => m3.value === model || m3.resolvedModel === model);
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/settings.ts
+// src/settings.ts
 var DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "opusplan"];
@@ -96,7 +96,7 @@ var Fragment2 = m3.Fragment;
 var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
-// ../plugins-api-retries/plugins/agent-claude/src/ui/ClaudeSettings.tsx
+// src/ui/ClaudeSettings.tsx
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -924,7 +924,7 @@ function ClaudeProxy({
   });
 }
 
-// ../plugins-api-retries/plugins/agent-claude/src/client.tsx
+// src/client.tsx
 var CLAUDE_SETTINGS_ORDER = CORE_SETTINGS_ORDER.workflow + 50;
 function ClaudeSection({ settings }) {
   return /* @__PURE__ */ jsx(ClaudeSettings, {
@@ -952,5 +952,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=BC4500CD158FAB1864756E2164756E21
+//# debugId=3A7D55B44156A72464756E2164756E21
 //# sourceMappingURL=client.js.map

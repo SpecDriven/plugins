@@ -95,6 +95,12 @@ class FakeQuery implements QueryLike {
   async applyFlagSettings(settings: Record<string, unknown>) {
     this.flags.push(settings);
   }
+  /** What the plugin asked of thinking: the budget, and how it is reported. */
+  thinkingAsks: [number | null, string | null | undefined][] = [];
+  async setMaxThinkingTokens(max: number | null, display?: string | null) {
+    this.thinkingAsks.push([max, display]);
+    if (fakeThinkingRefused) throw new Error("Unsupported control request: set_max_thinking_tokens");
+  }
   async supportedCommands() {
     return this.commands;
   }
@@ -110,6 +116,9 @@ class FakeQuery implements QueryLike {
     return fakeContext(opts?.detail ?? "full");
   }
 }
+
+/** Whether the next FakeQuery refuses the thinking request, as an older Claude Code would. */
+let fakeThinkingRefused = false;
 
 /** What the next FakeQuery answers the context count with; undefined refuses it. */
 let fakeContext: ((detail: string) => Promise<unknown>) | undefined;
@@ -140,6 +149,7 @@ beforeEach(async () => {
   fakes = [];
   fakeAccount = undefined;
   fakeContext = undefined;
+  fakeThinkingRefused = false;
   setClaudeAvailability(() => true);
   setQueryFactory(({ prompt, options }) => {
     const fake = new FakeQuery(prompt, options);
@@ -251,6 +261,15 @@ const delta = (text: string, index = 0) =>
     event: { type: "content_block_delta", index, delta: { type: "text_delta", text } },
     parent_tool_use_id: null,
     uuid: "u-d",
+    session_id: "claude-1",
+  });
+/** Claude thinking, as it streams; `parent` is the subagent call it thinks under. */
+const thinkingDelta = (thinking: string, index = 0, parent: string | null = null) =>
+  sdk({
+    type: "stream_event",
+    event: { type: "content_block_delta", index, delta: { type: "thinking_delta", thinking } },
+    parent_tool_use_id: parent,
+    uuid: "u-td",
     session_id: "claude-1",
   });
 const assistant = (id: string, content: unknown[]) =>
@@ -436,6 +455,135 @@ test("a turn goes to Claude and its reply streams into the event log", async () 
   const seqs = snap.events.map((e) => e.seq);
   expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
   expect(snap.meta.lastSeq).toBe(seqs.at(-1)!);
+});
+
+// specs/agents/claude.feature.md "Claude reports its thinking to the pane":
+// the pane's Thinking and Verbose transcript views show what Claude thought.
+// An app from before those views has no type for the events, so they are
+// read here by name; its log carries them all the same.
+const kindOf = (e: ChatEvent) => e.kind as string;
+
+test("what Claude thinks streams into the event log and settles as a thinking block of its message", async () => {
+  expect((agents.get("claude")!.capabilities as { thinking?: boolean }).thinking).toBe(true);
+  const { id, fake } = await idleSession();
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "implement the quote spec" });
+  await fake.input(1);
+  fake.emit(messageStart("msg_t"));
+  fake.emit(thinkingDelta("Read the spec "));
+  fake.emit(thinkingDelta("first."));
+  const streamed = await until(
+    () => snapshot(id),
+    (s) => s.events.filter((e) => kindOf(e) === "thinking_delta").length === 2,
+  );
+  expect(streamed.events.filter((e) => kindOf(e) === "thinking_delta") as unknown[]).toMatchObject([
+    { messageId: "msg_t", index: 0, text: "Read the spec " },
+    { messageId: "msg_t", index: 0, text: "first." },
+  ]);
+  // The thought whole, then the words it led to: two blocks of one message.
+  fake.emit(assistant("msg_t", [{ type: "thinking", thinking: "Read the spec first.", signature: "sig" }]));
+  fake.emit(delta("On it.", 1));
+  fake.emit(assistant("msg_t", [{ type: "text", text: "On it." }]));
+  fake.emit(result());
+  const snap = await untilStatus(id, "idle");
+  const said = snap.events.filter((e) => e.kind === "assistant") as unknown as { messageId: string; blocks: unknown[] }[];
+  expect(said.map((e) => [e.messageId, e.blocks])).toEqual([
+    ["msg_t", [{ type: "thinking", text: "Read the spec first." }]],
+    ["msg_t", [{ type: "text", text: "On it." }]],
+  ]);
+  // The turn ran as any other: thinking is no reply and ends no turn.
+  expect(snap.events.find((e) => e.kind === "result")).toMatchObject({ subtype: "success", isError: false });
+});
+
+test("mapSdkMessage passes on what Claude thinks, streamed and whole, and nothing for thinking Claude keeps to itself", () => {
+  const stream = { messageId: null as string | null };
+  mapSdkMessage(messageStart("msg_t"), { turn: 1 }, stream);
+  expect(mapSdkMessage(thinkingDelta("Hmm", 0), { turn: 1 }, stream) as unknown[]).toEqual([
+    { kind: "thinking_delta", messageId: "msg_t", index: 0, text: "Hmm" },
+  ]);
+  // A subagent's stream names the call that started it, thinking and words alike.
+  expect(mapSdkMessage(thinkingDelta("Look", 0, "task_1"), { turn: 1 }, stream) as unknown[]).toEqual([
+    { kind: "thinking_delta", messageId: "msg_t", index: 0, text: "Look", parentToolUseId: "task_1" },
+  ]);
+  const subagentWords = sdk({
+    type: "stream_event",
+    event: { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Found it." } },
+    parent_tool_use_id: "task_1",
+    uuid: "u-d",
+    session_id: "claude-1",
+  });
+  expect(mapSdkMessage(subagentWords, { turn: 1 }, stream) as unknown[]).toEqual([
+    { kind: "text_delta", messageId: "msg_t", index: 1, text: "Found it.", parentToolUseId: "task_1" },
+  ]);
+  // Thinking Claude Code keeps to itself streams empty, with a signature
+  // and a token estimate: nothing for the pane.
+  expect(mapSdkMessage(thinkingDelta(""), { turn: 1 }, stream)).toEqual([]);
+  const signature = sdk({
+    type: "stream_event",
+    event: { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig" } },
+    parent_tool_use_id: null,
+    uuid: "u-sd",
+    session_id: "claude-1",
+  });
+  expect(mapSdkMessage(signature, { turn: 1 }, stream)).toEqual([]);
+  expect(
+    mapSdkMessage(sdk({ type: "system", subtype: "thinking_tokens", estimated_tokens: 40, estimated_tokens_delta: 8 }), { turn: 1 }),
+  ).toEqual([]);
+
+  // Whole: the thought is a block of its message, before the words; a
+  // redacted thought and an empty one add nothing.
+  expect(
+    mapSdkMessage(
+      assistant("msg_t", [
+        { type: "thinking", thinking: "Plan it.", signature: "sig" },
+        { type: "redacted_thinking", data: "opaque" },
+        { type: "thinking", thinking: "  ", signature: "sig" },
+        { type: "text", text: "Done." },
+      ]),
+      { turn: 2 },
+    ) as unknown[],
+  ).toEqual([
+    {
+      kind: "assistant",
+      messageId: "msg_t",
+      turn: 2,
+      blocks: [
+        { type: "thinking", text: "Plan it." },
+        { type: "text", text: "Done." },
+      ],
+      parentToolUseId: null,
+    },
+  ]);
+  // A message that is nothing but thinking kept back is no event at all.
+  expect(mapSdkMessage(assistant("msg_u", [{ type: "thinking", thinking: "", signature: "sig" }]), { turn: 2 })).toEqual([]);
+});
+
+test("a session asks Claude Code for a summary of its thinking and leaves thinking itself as its settings have it", async () => {
+  const { id, fake } = await idleSession();
+  // The budget is left alone (null), only how thinking is reported is asked for.
+  expect(fake.thinkingAsks).toEqual([[null, "summarized"]]);
+  // Nothing at the start switches thinking on over Claude Code's settings.
+  const options = fake.options as { thinking?: unknown; maxThinkingTokens?: unknown };
+  expect(options.thinking).toBeUndefined();
+  expect(options.maxThinkingTokens).toBeUndefined();
+  // Asked once per run of Claude Code, not per message.
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "go" });
+  await fake.input(1);
+  fake.emit(result());
+  await untilStatus(id, "idle");
+  expect(fake.thinkingAsks).toHaveLength(1);
+});
+
+test("a Claude Code that refuses the thinking request still runs the session", async () => {
+  fakeThinkingRefused = true;
+  const { id, fake } = await idleSession();
+  expect(fake.thinkingAsks).toEqual([[null, "summarized"]]);
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "go" });
+  await fake.input(1);
+  fake.emit(assistant("msg_1", [{ type: "text", text: "Going." }]));
+  fake.emit(result());
+  const snap = await untilStatus(id, "idle");
+  expect(snap.events.some((e) => e.kind === "note" && e.level === "error")).toBe(false);
+  expect(snap.events.find((e) => e.kind === "assistant")).toMatchObject({ blocks: [{ type: "text", text: "Going." }] });
 });
 
 // A 1×1 PNG, as the pane sends a pasted one.

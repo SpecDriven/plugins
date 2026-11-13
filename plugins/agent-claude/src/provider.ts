@@ -26,7 +26,6 @@ import type {
   AgentHost,
   AgentOutput,
   AgentSession,
-  AssistantBlock,
   ChatAccount,
   OneShotRequest,
   OneShotResult,
@@ -44,7 +43,9 @@ import type {
   AgentModelOption,
   ChatContextUsage,
   ContextDetail,
+  PaneBlock,
   PaneHost,
+  PaneOutput,
   PaneProvider,
   PaneStartOptions,
   PastedImage,
@@ -248,6 +249,26 @@ export interface QueryLike extends AsyncIterable<SDKMessage> {
   applyFlagSettings?(settings: { effortLevel?: ClaudeEffort | null }): Promise<void>;
   /** Claude Code's /context count (src/contextUsage.ts); older binaries refuse it. */
   getContextUsage?(opts?: { detail?: ContextDetail }): Promise<unknown>;
+  /** The thinking budget and how thinking is reported (askForThinking, below). */
+  setMaxThinkingTokens?(
+    maxThinkingTokens: number | null,
+    thinkingDisplay?: "summarized" | "omitted" | null,
+  ): Promise<void>;
+}
+
+/**
+ * Ask Claude Code to report what Claude thinks as a summary rather than
+ * nothing, for the pane's Thinking and Verbose transcript views. This never
+ * switches thinking on or changes how much of it there is: `null` leaves the
+ * budget the session's own, so a Claude Code whose settings turn thinking
+ * off (`alwaysThinkingEnabled: false`) still does not think — checked
+ * against Claude Code 2.1.323, where the same turn took as long with the
+ * request as without. A Claude Code that refuses the request, or a query
+ * with no such method, is left as it is: the session matters more.
+ */
+export function askForThinking(query: QueryLike): void {
+  if (!query.setMaxThinkingTokens) return;
+  void query.setMaxThinkingTokens(null, "summarized").catch(() => undefined);
 }
 
 export type QueryFactory = (args: {
@@ -340,7 +361,7 @@ export function mapSdkMessage(
   msg: SDKMessage,
   ctx: { turn: number },
   stream: StreamContext = { messageId: null },
-): AgentOutput[] {
+): PaneOutput[] {
   switch (msg.type) {
     case "system": {
       if (msg.subtype === "init") {
@@ -372,6 +393,9 @@ export function mapSdkMessage(
         stream.messageId = ev.message.id;
         return [];
       }
+      // A subagent's stream names the call that started it, so the pane
+      // keeps it with that call from its first word.
+      const parent = msg.parent_tool_use_id ? { parentToolUseId: msg.parent_tool_use_id } : {};
       if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
         return [
           {
@@ -379,20 +403,39 @@ export function mapSdkMessage(
             messageId: stream.messageId ?? "",
             index: ev.index,
             text: ev.delta.text,
+            ...parent,
+          },
+        ];
+      }
+      // What Claude thinks, as it thinks it. A Claude Code that keeps the
+      // thinking to itself streams empty deltas (and a token estimate the
+      // pane has no use for): those are nothing to show.
+      if (ev.type === "content_block_delta" && ev.delta.type === "thinking_delta" && ev.delta.thinking) {
+        return [
+          {
+            kind: "thinking_delta",
+            messageId: stream.messageId ?? "",
+            index: ev.index,
+            text: ev.delta.thinking,
+            ...parent,
           },
         ];
       }
       return [];
     }
     case "assistant": {
-      const blocks: AssistantBlock[] = [];
+      const blocks: PaneBlock[] = [];
       for (const block of msg.message.content) {
         if (block.type === "text") blocks.push({ type: "text", text: block.text });
         else if (block.type === "tool_use") {
           blocks.push({ type: "tool_use", id: block.id, name: block.name, input: block.input });
+        } else if (block.type === "thinking") {
+          // The thought whole. One Claude kept to itself comes empty, and a
+          // redacted one is not text at all: neither adds to the transcript.
+          if (block.thinking.trim()) blocks.push({ type: "thinking", text: block.thinking });
         }
       }
-      const events: AgentOutput[] = [];
+      const events: PaneOutput[] = [];
       if (blocks.length > 0) {
         events.push({
           kind: "assistant",
@@ -413,7 +456,7 @@ export function mapSdkMessage(
       if ("isReplay" in msg && msg.isReplay) return [];
       const content = msg.message.content;
       if (typeof content === "string") return [];
-      const events: AgentOutput[] = [];
+      const events: PaneOutput[] = [];
       for (const block of content) {
         if (block.type !== "tool_result") continue;
         events.push({
@@ -611,6 +654,13 @@ class ClaudeSession implements AgentSession {
     if (!this.query?.setModel) throw new AgentError(409, "This Claude Code cannot switch models mid-session");
     await this.query.setModel(model ?? undefined);
     this.model = model;
+  }
+
+  /** Put Claude's output in the session's log. An app from before the
+      transcript views has no type for thinking (src/paneContract.ts
+      PaneOutput); its log and its pane take the events all the same. */
+  private emit(body: PaneOutput): void {
+    this.host.emit(body as AgentOutput);
   }
 
   /** The pane's effort pick, the same way. */
@@ -841,7 +891,7 @@ class ClaudeSession implements AgentSession {
         );
         return;
       }
-      for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream)) this.host.emit(body);
+      for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream)) this.emit(body);
       this.host.update({
         agentSessionId: msg.session_id,
         model: msg.model,
@@ -869,7 +919,7 @@ class ClaudeSession implements AgentSession {
       const tokens = tokensInWindow(msg.message.usage);
       if (tokens !== null && tokens > 0) this.lastWindowTokens = tokens;
     }
-    for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream)) this.host.emit(body);
+    for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream)) this.emit(body);
     if (msg.type === "result") {
       this.contextWindow = contextWindowOf(msg.modelUsage, this.model) ?? this.contextWindow;
       this.host.turnEnded();
@@ -1062,6 +1112,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
       effort: true,
       images: true,
       contextUsage: "breakdown",
+      thinking: true,
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -1111,6 +1162,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
           stderr: session.stderr,
         };
         const query = await factory()({ prompt: input, options: sdkOptions });
+        askForThinking(query);
         return { query, apiBaseUrl: launch.apiBaseUrl, firstResponseMs };
       };
       session.effort = opts.effort ?? (await settings()).defaultEffort;
