@@ -1,0 +1,15 @@
+{
+  "plugin": "agent-opencode",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "file": "agent-opencode-1.0.0.zip",
+      "sha256": "dc36e6c64f586e632c3adcfff2c2358530722727cbd71c192ac8f50bc7731bed",
+      "size": 14025,
+      "date": "2026-11-12",
+      "api": "1",
+      "minAppVersion": "0.1.267",
+      "notes": "OpenCode in the coding agent pane"
+    }
+  ]
+}

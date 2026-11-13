@@ -8,28 +8,18 @@
 // (git's index) after dropping the lines that change without the plugin
 // changing: the module path comments, which follow the folder the build ran
 // from; the `var x = m.x;` shim lines, which list every export of the
-// building app's SDK; and the debug id. Source maps are not compared.
+// building app's SDK; and the debug id (scripts/normalize.ts). Source maps
+// are not compared.
 
 import { join, relative, resolve } from "node:path";
 import { $ } from "bun";
+import { normalize } from "./normalize";
 
 const root = resolve(import.meta.dir, "..");
 const app = resolve(process.env.SPECDRIVEN_APP ?? join(root, "..", "specdriven-app"));
 const arg = process.argv[2];
 if (!arg) throw new Error("usage: bun scripts/check-dist.ts plugins/<name>");
 const dir = resolve(root, arg);
-
-const NOISE = [
-  /^\/\/ \S+$/, // module path comment
-  /^\s*(var )?[\w$]+ = m\d*\.[\w$]+;$/, // shim export: `var x = m.x;`, `  x = m.x;`, `var x = m2.x;`
-  /^var m\d*(, [\w$]+)*;$/, // the client shim's declaration list
-  /^\/\/# debugId=/,
-];
-const normalize = (code: string) =>
-  code
-    .split("\n")
-    .filter((line) => !NOISE.some((re) => re.test(line)))
-    .join("\n");
 
 await $`bun ${join(app, "src/index.ts")} plugin build .`.cwd(dir);
 
