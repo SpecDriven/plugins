@@ -76,6 +76,9 @@ jobs:
 
   plugin:
     needs: matrix
+    # A marketplace with no plugins yet has no rows, and an empty matrix is
+    # an error in Actions: skip the job instead.
+    if: needs.matrix.outputs.matrix != '{"include":[]}'
     name: ${{ matrix.plugin }} · ${{ matrix.kind }}
     runs-on: ubuntu-latest
     # The app's main is a warning on pull requests: a plugin cannot fix an
@@ -120,12 +123,15 @@ jobs:
         run: bun scripts/check-release.ts ${{ matrix.dir }}
 
   # One check to require on main: the index and every floor and release row.
+  # The plugin job is skipped when the index lists no plugins of its own.
   ci:
     if: always()
-    needs: [index, plugin]
+    needs: [matrix, index, plugin]
     runs-on: ubuntu-latest
     steps:
       - name: Index and plugins passed
         run: |
           echo "index: ${{ needs.index.result }}, plugins: ${{ needs.plugin.result }}"
-          [ "${{ needs.index.result }}" = success ] && [ "${{ needs.plugin.result }}" = success ]
+          [ "${{ needs.index.result }}" = success ] || exit 1
+          [ "${{ needs.plugin.result }}" = success ] && exit 0
+          [ "${{ needs.plugin.result }}" = skipped ] && [ '${{ needs.matrix.outputs.matrix }}' = '{"include":[]}' ]

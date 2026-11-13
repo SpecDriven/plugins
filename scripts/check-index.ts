@@ -202,7 +202,12 @@ async function checkReleases(
   return list.length;
 }
 
-const folders = readdirSync(join(root, "plugins")).filter((d) => statSync(join(root, "plugins", d)).isDirectory());
+// A marketplace just initialized from the app has no plugins/ folder with
+// anything in it yet — git keeps no empty folders.
+const pluginsDir = join(root, "plugins");
+const folders = existsSync(pluginsDir)
+  ? readdirSync(pluginsDir).filter((d) => statSync(join(pluginsDir, d)).isDirectory())
+  : [];
 for (const d of folders) {
   if (!listed.has(`plugins/${d}`)) problems.push(`plugins/${d} is not listed in marketplace.json`);
 }
