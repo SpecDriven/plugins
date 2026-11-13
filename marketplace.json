@@ -64,6 +64,18 @@
         "id": "pi",
         "command": "pi"
       }
+    },
+    {
+      "name": "agent-opencode",
+      "source": "./plugins/agent-opencode",
+      "description": "OpenCode in the coding agent pane, over its Agent Client Protocol server — any model it is signed in to, with permission cards for edits and commands",
+      "version": "1.0.0",
+      "category": "agents",
+      "api": "1",
+      "agent": {
+        "id": "opencode",
+        "command": "opencode"
+      }
     }
   ]
 }

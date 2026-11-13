@@ -21,7 +21,8 @@ claims; the manifest is checked again after the clone.
 ## Coding agents
 
 The `agents` category holds the plugins that put a coding agent in the
-app's agent pane — `agent-claude`, `agent-codex` and `agent-pi`. Each row
+app's agent pane — `agent-claude`, `agent-codex`, `agent-opencode` and
+`agent-pi`. Each row
 also carries `agent: { id, command }`: the provider id the plugin registers
 and the command it needs on PATH. The app looks for those commands on this
 machine and installs the plugin for each it finds, so a developer with

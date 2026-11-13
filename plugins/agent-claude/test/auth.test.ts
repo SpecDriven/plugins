@@ -6,7 +6,7 @@
 // CLI — fetched first when there is none — and the routes — which never hand the token to the page.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "@specdriven/app/src/server/api";
@@ -602,7 +602,9 @@ test("PUT /api/claude/settings stores the choice and the url, and null forgets t
   const left = await section();
   expect("claudeAuth" in left).toBe(false);
   expect("claudeProxyUrl" in left).toBe(false);
-  const written = JSON.parse(await readFile(join(root, ".specdriven", "settings.json"), "utf8")) as Record<string, unknown>;
+  // Read through the app, whose settings file is settings.json or, from
+  // SpecDriven 0.1.265, settings.yaml.
+  const written = (await readState(root)) as Record<string, unknown>;
   expect("claudeAuth" in written).toBe(false);
   expect("claudeProxyUrl" in written).toBe(false);
 });

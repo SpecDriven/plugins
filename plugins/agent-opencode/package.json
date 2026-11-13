@@ -1,0 +1,36 @@
+{
+  "name": "@specdriven/plugin-agent-opencode",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "description": "OpenCode in the coding agent pane, over its Agent Client Protocol server, with permission cards for edits and commands",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./dist/host.js"
+  },
+  "scripts": {
+    "build": "specdriven plugin build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "specdriven": {
+    "id": "agent-opencode",
+    "api": "1",
+    "displayName": "OpenCode agent",
+    "description": "OpenCode in the coding agent pane, over its Agent Client Protocol server, with permission cards for edits and commands",
+    "host": "./dist/host.js",
+    "src": {
+      "host": "./src/host.ts"
+    },
+    "minAppVersion": "0.1.267",
+    "defaultEnabled": true,
+    "autoEnable": true,
+    "permissions": [
+      "process:spawn"
+    ]
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^5"
+  }
+}
