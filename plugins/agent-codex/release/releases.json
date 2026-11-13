@@ -2,6 +2,16 @@
   "plugin": "agent-codex",
   "releases": [
     {
+      "version": "1.4.0",
+      "file": "agent-codex-1.4.0.zip",
+      "sha256": "d3526c22db3602f98518e1e2f5ff8006113b814341f8dd27396a754ff451ee05",
+      "size": 27595,
+      "date": "2026-11-13",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Sign in with a ChatGPT account or the API in Settings, and list the models the sign-in offers"
+    },
+    {
       "version": "1.3.0",
       "file": "agent-codex-1.3.0.zip",
       "sha256": "b281f320fec92ba82d9f0cee50f4d6bbcde697fd2b39a7b832654cd4eaaefb59",

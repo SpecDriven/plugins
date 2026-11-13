@@ -205,7 +205,7 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
 /**
  * The pane's first-response wait (specs/agents/agent-pane.feature.md "A
  * Claude turn fails fast when the API proxy does not answer"): only a
- * Claude whose API goes through a proxy is held to it.
+ * Claude that signs in with the API is held to it.
  */
 function ProxyTimeout({
   info,
@@ -231,11 +231,11 @@ function ProxyTimeout({
       <span className="settings-row-label">
         Proxy timeout (seconds)
         <span className="settings-row-hint">
-          A turn in the coding agent pane that gets no response from the API through the proxy
-          in this time is sent again after a short pause, and stopped with an error once three
-          tries got none — instead of retrying for minutes while the proxy is down. 0 waits as
-          long as Claude Code retries; the default is{" "}
-          {DEFAULT_AGENT_FIRST_RESPONSE_SECONDS}. Applies to sessions started after the change.
+          A turn in the coding agent pane that gets no response from the API in this time is sent
+          again after a short pause, and stopped with an error once three tries got none — instead
+          of retrying for minutes while the API is down. 0 waits as long as Claude Code retries;
+          the default is {DEFAULT_AGENT_FIRST_RESPONSE_SECONDS}. Applies to sessions started after
+          the change.
         </span>
       </span>
       <input
