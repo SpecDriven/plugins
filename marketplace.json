@@ -45,7 +45,7 @@
       "name": "agent-codex",
       "source": "./plugins/agent-codex",
       "description": "OpenAI Codex in the coding agent pane, over the Codex CLI's app server — with how it signs in (your ChatGPT account or the API) in Settings",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "category": "agents",
       "api": "1",
       "agent": {

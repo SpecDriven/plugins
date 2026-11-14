@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { modelLabel, narrowModels, type CodexModel } from "../modelMenu";
+import { EFFORT_LEVELS, modelLabel, narrowModels, type CodexModel, type EffortLevel } from "../modelMenu";
 import { OPENAI_API_URL, type CodexAuthMode } from "../settings";
 
 // Settings → Codex (specs/agents/codex.feature.md "Choose how Codex signs
 // in", "API settings are filled in from Codex's own config", "Sign in to
 // Codex with a ChatGPT account", "Codex lists the models its sign-in
-// offers"): how every Codex the app starts signs in — the ChatGPT account
-// the Codex CLI is signed in to, or the API with a key kept on this device
-// — and the model it starts on. The host half (src/auth.ts, src/host.ts)
+// offers", "Codex offers the reasoning efforts its model takes"): how every
+// Codex the app starts signs in — the ChatGPT account the Codex CLI is
+// signed in to, or the API with a key kept on this device — and the model
+// and effort it starts on. The host half (src/auth.ts, src/host.ts)
 // never sends a key back; the page learns only whether there is one. What
 // the section changes goes through the plugin's own route
 // (PUT /api/codex/settings), into its section of the settings file.
@@ -41,6 +42,9 @@ export interface CodexAuthInfo {
   };
   /** The model a new Codex starts on; null is Codex's own default. */
   defaultModel: string | null;
+  /** The effort a new Codex runs at; null is the model's own. Absent from
+      a host half before the setting. */
+  defaultEffort?: EffortLevel | null;
   signIn: CodexSignIn | null;
 }
 
@@ -64,6 +68,7 @@ async function patchCodexSettings(patch: {
   codexAuth?: CodexAuthMode | null;
   codexApiUrl?: string | null;
   defaultModel?: string | null;
+  defaultEffort?: EffortLevel | null;
 }): Promise<string | null> {
   const result = await call("PUT", "/api/codex/settings", patch);
   return result.ok ? null : result.error;
@@ -177,8 +182,59 @@ export function CodexSettings({ models = null }: { models?: string[] | null } = 
         refresh={refresh}
         onError={setError}
       />
+      <DefaultEffort info={info} refresh={refresh} onError={setError} />
       {error && <p className="error">{error}</p>}
     </div>
+  );
+}
+
+/** Each level as the select names it, as the pane's effort row does. */
+const EFFORT_NAMES: Record<EffortLevel, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+/**
+ * "Default effort" ("Codex offers the reasoning efforts its model takes"):
+ * how hard a new Codex reasons — the same value the coding agent pane's
+ * effort row shows and sets. A level the model does not take is lowered to
+ * one it does.
+ */
+export function DefaultEffort({
+  info,
+  refresh,
+  onError,
+}: {
+  info: Pick<CodexAuthInfo, "defaultEffort">;
+  refresh: () => Promise<void>;
+  onError: (error: string | null) => void;
+}) {
+  const pick = async (value: string) => {
+    onError(await patchCodexSettings({ defaultEffort: value ? (value as EffortLevel) : null }));
+    await refresh();
+  };
+  return (
+    <label className="settings-row">
+      <span className="settings-row-label">
+        Default effort
+        <span className="settings-row-hint">
+          How hard Codex reasons in the coding agent pane, unless you pick another level there. A
+          level the model does not take is lowered to one it does. Applies to sessions started after
+          the change.
+        </span>
+      </span>
+      <select aria-label="Default Codex effort" value={info.defaultEffort ?? ""} onChange={(e) => void pick(e.target.value)}>
+        <option value="">The model's default</option>
+        {EFFORT_LEVELS.map((e) => (
+          <option key={e} value={e}>
+            {EFFORT_NAMES[e]}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

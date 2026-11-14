@@ -1,11 +1,14 @@
 // The plugin's own settings (specs/agents/codex.feature.md "Choose how
 // Codex signs in", in the specs repo): how the Codex the app starts signs
 // in — the ChatGPT account the Codex CLI is signed in to, or the API — the
-// API's address, and the model a new Codex starts on ("Codex lists the
-// models its sign-in offers"). Kept in the plugin's section of the settings file
-// (HostConfig.settings); the API key is a secret and lives in the plugin's
-// secret store instead (src/host.ts). Pure, so the host and browser halves
-// share it.
+// API's address, the model a new Codex starts on ("Codex lists the models
+// its sign-in offers") and the reasoning effort it runs at ("Codex offers
+// the reasoning efforts its model takes"). Kept in the plugin's section of
+// the settings file (HostConfig.settings); the API key is a secret and
+// lives in the plugin's secret store instead (src/host.ts). Pure, so the
+// host and browser halves share it.
+
+import { normalizeEffort, type EffortLevel } from "./modelMenu";
 
 /** How the app's Codex signs in: the ChatGPT account, or the API. */
 export type CodexAuthMode = "login" | "api";
@@ -22,9 +25,16 @@ export interface CodexSettingsValues {
   codexApiUrl: string | null;
   /** The model a new Codex starts on, or null for Codex's own default. */
   defaultModel: string | null;
+  /** The reasoning effort a new Codex runs at, or null for the model's own default. */
+  defaultEffort: EffortLevel | null;
 }
 
-export const DEFAULT_SETTINGS: CodexSettingsValues = { codexAuth: null, codexApiUrl: null, defaultModel: null };
+export const DEFAULT_SETTINGS: CodexSettingsValues = {
+  codexAuth: null,
+  codexApiUrl: null,
+  defaultModel: null,
+  defaultEffort: null,
+};
 
 /** Letters, digits and the punctuation model ids use — `gpt-5.1-codex`,
     `openai/gpt-5`, a deployment's name — with no spaces. */
@@ -63,6 +73,7 @@ export function codexSettingsOf(section: Record<string, unknown>): CodexSettings
     codexAuth: normalizeCodexAuth(section.codexAuth),
     codexApiUrl: normalizeCodexApiUrl(section.codexApiUrl),
     defaultModel: normalizeModel(section.defaultModel),
+    defaultEffort: normalizeEffort(section.defaultEffort),
   };
 }
 
@@ -70,7 +81,8 @@ export function codexSettingsOf(section: Record<string, unknown>): CodexSettings
  * A `PUT /api/codex/settings` body as a patch to the section, or the
  * refusal: `codexAuth` login, api or null (forget the choice);
  * `codexApiUrl` an http(s) url, "" or null (forget it); `defaultModel` a
- * model id, "" or null (Codex's own default).
+ * model id, "" or null (Codex's own default); `defaultEffort` an effort
+ * level or null (the model's own default).
  */
 export function codexSettingsPatch(body: unknown): { patch: Record<string, unknown> } | { error: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "a settings object is required" };
@@ -101,6 +113,13 @@ export function codexSettingsPatch(body: unknown): { patch: Record<string, unkno
     if (model && !normalizeModel(model)) return { error: "Enter a model id, with no spaces" };
     patch.defaultModel = model || null;
   }
-  if (Object.keys(patch).length === 0) return { error: "codexAuth, codexApiUrl or defaultModel is required" };
+  if (b.defaultEffort !== undefined) {
+    const effort = normalizeEffort(b.defaultEffort);
+    if (b.defaultEffort !== null && !effort) return { error: "defaultEffort must be low, medium, high, xhigh, max or null" };
+    patch.defaultEffort = effort;
+  }
+  if (Object.keys(patch).length === 0) {
+    return { error: "codexAuth, codexApiUrl, defaultModel or defaultEffort is required" };
+  }
   return { patch };
 }

@@ -8,7 +8,8 @@
 // its one-shot turns run `codex exec` instead (src/oneShot.ts). How it
 // signs in — a ChatGPT account or the API — is Settings → Codex's choice
 // (src/auth.ts), handed to every Codex as its launch; the models it offers
-// are the sign-in's (src/models.ts).
+// are the sign-in's (src/models.ts), and the reasoning efforts each model
+// takes are Codex's own word on it.
 //
 // Node APIs only (src/server/run.ts): this module also runs under Electron.
 
@@ -26,7 +27,7 @@ import type {
 } from "@specdriven/host";
 import { CodexAuthError, plainLaunch, type CodexLaunch } from "./auth";
 import { CODEX_BIN, codexAvailable } from "./cli";
-import { narrowModels, type CodexModel } from "./modelMenu";
+import { effortFor, narrowModels, type CodexModel, type EffortLevel } from "./modelMenu";
 import { codexOneShot } from "./oneShot";
 import {
   CODEX_CLIENT_INFO,
@@ -130,6 +131,10 @@ class CodexSession implements AgentSession {
   /** The model the pane switched to since the thread started: it goes
       with the next turn, and Codex keeps it for the turns after. */
   private nextModel: string | null = null;
+  /** The effort the pane picked (null: the model's own), and the last one
+      a turn asked Codex for, which Codex keeps for the turns after. */
+  private effort: EffortLevel | null;
+  private sentEffort: EffortLevel | null = null;
 
   constructor(
     private readonly host: AgentHost,
@@ -140,8 +145,13 @@ class CodexSession implements AgentSession {
     private readonly startModel: string | null = null,
     /** The sign-in the session was started under, for the header's chip. */
     private readonly account: ChatAccount | null = null,
+    /** The effort the session starts at; null is the model's own. */
+    effort: EffortLevel | null = null,
+    /** What the sign-in says of a model: the efforts it takes. */
+    private readonly modelInfo: (model: string) => Promise<CodexModel | undefined> = async () => undefined,
   ) {
     this.mode = mode;
+    this.effort = effort;
   }
 
   get final(): boolean {
@@ -200,6 +210,7 @@ class CodexSession implements AgentSession {
     this.host.ready({
       agentSessionId: info.threadId,
       ...(info.model ? { model: info.model } : {}),
+      ...(this.effort ? { effort: this.effort } : {}),
       ...(this.account ? { account: this.account } : {}),
     });
     if (prompt || images?.length) {
@@ -213,18 +224,35 @@ class CodexSession implements AgentSession {
     }
   }
 
+  /**
+   * The effort the next turn asks of Codex: the pane's pick, lowered to one
+   * the turn's model takes (none for a model Codex sends no effort for).
+   * Back on the model's own after another was asked, the turn asks for the
+   * model's default, since Codex keeps the last effort it was given.
+   */
+  private async turnEffort(): Promise<EffortLevel | null> {
+    if (!this.effort && !this.sentEffort) return null;
+    const model = this.nextModel ?? this.model;
+    const info = model ? await this.modelInfo(model) : undefined;
+    if (this.effort) return effortFor(this.effort, info);
+    return info?.defaultEffort ?? null;
+  }
+
   /** One turn: the text (and pasted images) to Codex, with the pane's mode
-      as the policy overrides. */
+      as the policy overrides, and its effort when it picked one. */
   async send(text: string, images?: PastedImage[]): Promise<void> {
     const client = this.client!;
     if (!this.threadId || this.final) return;
     const policy = codexPolicy(this.mode);
+    const effort = await this.turnEffort();
+    if (this.final) return;
     const res = await client.request("turn/start", {
       threadId: this.threadId,
       input: codexTextInput(text, images?.map((image) => image.path)),
       approvalPolicy: policy.approvalPolicy,
       sandboxPolicy: codexSandboxPolicy(policy.sandbox),
       ...(this.nextModel ? { model: this.nextModel } : {}),
+      ...(effort ? { effort } : {}),
     });
     if (this.final) return;
     if (!res.ok) throw new Error(`Codex refused the turn: ${res.error}`);
@@ -232,6 +260,7 @@ class CodexSession implements AgentSession {
       this.model = this.nextModel;
       this.nextModel = null;
     }
+    if (effort) this.sentEffort = this.effort ? effort : null;
     const turn = rec(res.result.turn);
     const turnId = turn ? str(turn.id) : null;
     if (turnId && this.stream.turnId === null) this.stream.turnId = turnId;
@@ -260,6 +289,14 @@ class CodexSession implements AgentSession {
     const next = model ?? this.startModel;
     this.nextModel = next && next !== this.model ? next : null;
     if (this.host.busy()) this.host.note("info", "api", "The new model applies from the next turn.");
+  }
+
+  /** The pane picked another effort (null: the model's own): it goes with
+      the next turn, lowered to one the model takes. */
+  async setEffort(effort: EffortLevel | null): Promise<void> {
+    if (this.host.status() === "starting") throw new AgentError(409, "Codex is still starting");
+    this.effort = effort;
+    if (this.host.busy()) this.host.note("info", "api", "The new effort applies from the next turn.");
   }
 
   close(): void {
@@ -513,7 +550,7 @@ export function createCodexProvider(options: CodexProviderOptions = {}): PanePro
       hasAccount: options.signIn !== undefined,
       rememberPermissions: "session",
       oneShot: true,
-      ...(menus ? { canChangeModelMidSession: true } : {}),
+      ...(menus ? { canChangeModelMidSession: true, effort: true } : {}),
       images: true,
       contextUsage: "totals",
     },
@@ -527,7 +564,17 @@ export function createCodexProvider(options: CodexProviderOptions = {}): PanePro
       const run = await launch();
       const account = await options.signIn?.().catch(() => undefined);
       const model = opts.model ?? (menus ? await defaultModel() : null);
-      const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode, model, account ?? null);
+      const effort = menus ? (opts.effort ?? (await settings()).defaultEffort) : null;
+      const session = new CodexSession(
+        opts.host,
+        opts.name,
+        opts.cwd,
+        opts.permissionMode,
+        model,
+        account ?? null,
+        effort,
+        async (id) => (await offered()).find((m) => m.value === id),
+      );
       // The MCP servers the app asks for (AgentStartOptions.mcpServers):
       // the Confluence server while a wiki token is saved.
       const extraArgs = [...run.args, ...(opts.mcpServers?.length ? codexMcpArgs(opts.mcpServers) : [])];
@@ -564,22 +611,33 @@ export function createCodexProvider(options: CodexProviderOptions = {}): PanePro
       ? {
           /** The pane's model menu: every model the sign-in offers — the
               API's own list, or Codex's for a ChatGPT account — narrowed to
-              the names the data repo lists for Codex when it lists any; and
-              what a new session starts on. */
+              the names the data repo lists for Codex when it lists any,
+              each with the efforts Codex says it takes; and the model and
+              effort a new session starts on. */
           async choices(): Promise<AgentChoices> {
             const models = narrowModels(await offered(), await listedModels()).map((m) => ({
               value: m.value,
               displayName: m.displayName,
               ...(m.description ? { description: m.description } : {}),
+              ...(m.efforts ? { efforts: m.efforts } : {}),
             }));
             const account = await options.signIn?.().catch(() => undefined);
-            return { models, model: await defaultModel(), effort: null, ...(account ? { account } : {}) };
+            return {
+              models,
+              model: await defaultModel(),
+              effort: (await settings()).defaultEffort,
+              ...(account ? { account } : {}),
+            };
           },
           /** A pick in the pane becomes Settings → Codex's default. */
           async setDefaults(patch: AgentDefaultsPatch): Promise<void> {
-            if (patch.model === undefined) return;
+            const saved = {
+              ...(patch.model !== undefined ? { defaultModel: patch.model } : {}),
+              ...(patch.effort !== undefined ? { defaultEffort: patch.effort } : {}),
+            };
+            if (Object.keys(saved).length === 0) return;
             if (!options.saveSettings) throw new AgentError(409, "Codex keeps no defaults here");
-            await options.saveSettings({ defaultModel: patch.model });
+            await options.saveSettings(saved);
           },
           /** Every model the sign-in offers, for the app's check of the
               data repo's list; null when it offers none. */

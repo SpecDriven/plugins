@@ -5,12 +5,51 @@
 // `.specdriven/codex-models.json` narrows it to the names it lists, when it
 // lists any. Pure: the Settings page and the host both use it.
 
+/** The pane's effort levels (the app's EffortLevel), lowest first. */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+export const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+
+/** An effort level, or null when the value is none. */
+export function normalizeEffort(value: unknown): EffortLevel | null {
+  return (EFFORT_LEVELS as readonly unknown[]).includes(value) ? (value as EffortLevel) : null;
+}
+
 /** One row of a model menu. */
 export interface CodexModel {
   /** What Codex takes as a model: its id. */
   value: string;
   displayName: string;
   description: string;
+  /** The reasoning efforts the model takes, as the pane's levels: Codex's
+      own list for it, without the levels the pane has none for (`minimal`,
+      `ultra`). Empty: a model Codex sends no effort for. Absent: unknown. */
+  efforts?: EffortLevel[];
+  /** The effort Codex runs the model at when none is asked for. */
+  defaultEffort?: EffortLevel;
+}
+
+/** Codex's effort names, in whatever order it lists them, as the pane's
+    levels in the pane's order; the ones the pane has none for dropped. */
+export function paneEfforts(names: readonly unknown[]): EffortLevel[] {
+  return EFFORT_LEVELS.filter((level) => names.includes(level));
+}
+
+/**
+ * The effort to ask of a model for the level picked: the level itself when
+ * the model takes it, else the highest it takes below the level, else its
+ * lowest (the pane offers every level for a model it knows nothing of, and
+ * "the agent lowers one its model does not take"). Null when the model
+ * takes none; the level unchanged when nothing is known of the model.
+ */
+export function effortFor(level: EffortLevel, model: Pick<CodexModel, "efforts"> | undefined): EffortLevel | null {
+  const takes = model?.efforts;
+  if (!takes) return level;
+  if (takes.length === 0) return null;
+  if (takes.includes(level)) return level;
+  const rank = EFFORT_LEVELS.indexOf(level);
+  const below = takes.filter((e) => EFFORT_LEVELS.indexOf(e) < rank);
+  return below.at(-1) ?? takes[0]!;
 }
 
 /**

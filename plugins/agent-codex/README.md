@@ -38,16 +38,23 @@ The model menus — the pane's picker and Settings → Codex's "Default model"
 Codex's own list for a ChatGPT account, narrowed by the data repo's
 `.specdriven/codex-models.json` when it lists any.
 
+The effort row — the pane's picker and Settings → Codex's "Default effort"
+— offers the reasoning efforts each model takes, as Codex says: its own
+list for a ChatGPT account, and for an API's models the catalog shipped
+with the CLI (`codex debug models --bundled`). A model the catalog does not
+know gets no effort row, since Codex sends it none. The effort goes with
+each turn, lowered to one the turn's model takes.
+
 ## Layout
 
 ```
 src/host.ts        the host half: registers the provider, and the sign-in routes
 src/client.tsx     the browser half: the Settings section
 src/ui/            Settings → Codex
-src/settings.ts    the plugin's own settings: the sign-in, the API's address, the default model
+src/settings.ts    the plugin's own settings: the sign-in, the API's address, the default model and effort
 src/auth.ts        the sign-in: what Codex's config says, the launch, the ChatGPT login, the API check
-src/models.ts      the models the sign-in offers, and the data repo's list
-src/modelMenu.ts   narrowing a model menu (shared with the page)
+src/models.ts      the models the sign-in offers and their efforts, and the data repo's list
+src/modelMenu.ts   narrowing a model menu, and lowering an effort (shared with the page)
 src/provider.ts    the AgentProvider over the app server
 src/codexChat.ts   the app-server protocol: the stream, its notifications, policies and answers
 src/oneShot.ts     one-shot turns over `codex exec`

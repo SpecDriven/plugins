@@ -66,6 +66,7 @@ var useTransition = m2.useTransition;
 var version = m2.version;
 
 // plugins/agent-codex/src/modelMenu.ts
+var EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 function narrowModels(all, listed) {
   if (listed.length === 0)
     return [...all];
@@ -227,9 +228,61 @@ function CodexSettings({ models = null } = {}) {
         refresh,
         onError: setError
       }),
+      /* @__PURE__ */ jsx(DefaultEffort, {
+        info,
+        refresh,
+        onError: setError
+      }),
       error && /* @__PURE__ */ jsx("p", {
         className: "error",
         children: error
+      })
+    ]
+  });
+}
+var EFFORT_NAMES = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max"
+};
+function DefaultEffort({
+  info,
+  refresh,
+  onError
+}) {
+  const pick = async (value) => {
+    onError(await patchCodexSettings({ defaultEffort: value ? value : null }));
+    await refresh();
+  };
+  return /* @__PURE__ */ jsxs("label", {
+    className: "settings-row",
+    children: [
+      /* @__PURE__ */ jsxs("span", {
+        className: "settings-row-label",
+        children: [
+          "Default effort",
+          /* @__PURE__ */ jsx("span", {
+            className: "settings-row-hint",
+            children: "How hard Codex reasons in the coding agent pane, unless you pick another level there. A level the model does not take is lowered to one it does. Applies to sessions started after the change."
+          })
+        ]
+      }),
+      /* @__PURE__ */ jsxs("select", {
+        "aria-label": "Default Codex effort",
+        value: info.defaultEffort ?? "",
+        onChange: (e) => void pick(e.target.value),
+        children: [
+          /* @__PURE__ */ jsx("option", {
+            value: "",
+            children: "The model's default"
+          }),
+          EFFORT_LEVELS.map((e) => /* @__PURE__ */ jsx("option", {
+            value: e,
+            children: EFFORT_NAMES[e]
+          }, e))
+        ]
       })
     ]
   });
@@ -768,5 +821,5 @@ export {
   CODEX_SETTINGS_ORDER
 };
 
-//# debugId=6CEDCD9AEDCFD56F64756E2164756E21
+//# debugId=128644919E4A1C6064756E2164756E21
 //# sourceMappingURL=client.js.map

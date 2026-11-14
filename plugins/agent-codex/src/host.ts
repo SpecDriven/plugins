@@ -28,7 +28,15 @@ import {
 } from "./auth";
 import type { EffectiveCodexAuth, LoginStatus } from "./auth";
 import { codexAvailable } from "./cli";
-import { fetchAccountModels, fetchApiModels, forgetModels, listedCodexModels, offeredModels as keptModels } from "./models";
+import {
+  codexCatalog,
+  fetchAccountModels,
+  fetchApiModels,
+  forgetModels,
+  listedCodexModels,
+  offeredModels as keptModels,
+  withCatalogEfforts,
+} from "./models";
 import type { CodexModel } from "./models";
 import { createCodexProvider, describeSignIn } from "./provider";
 import { codexSettingsOf, codexSettingsPatch } from "./settings";
@@ -82,6 +90,8 @@ function codexAuthView(auth: EffectiveCodexAuth, login: LoginStatus, own: CodexS
     },
     /** The model a new Codex starts on; null is Codex's own default. */
     defaultModel: own.defaultModel,
+    /** The effort a new Codex runs at; null is the model's own. */
+    defaultEffort: own.defaultEffort,
     signIn: loginState(),
   };
 }
@@ -149,8 +159,12 @@ const plugin: Plugin<Context, HostConfig> = {
       if (!auth.api) return [];
       const { url, key } = auth.api;
       // Kept for this address and key only: an answer asked for under
-      // another sign-in is never offered.
-      return keptModels(() => fetchApiModels(url, key), `api\n${url}\n${key ?? ""}`);
+      // another sign-in is never offered. The API says nothing of
+      // reasoning; Codex's catalog says which efforts each model takes.
+      return keptModels(
+        async () => withCatalogEfforts(await fetchApiModels(url, key), await codexCatalog()),
+        `api\n${url}\n${key ?? ""}`,
+      );
     };
 
     /** describeSignIn for what Settings chose: the API's address, or the
@@ -172,7 +186,7 @@ const plugin: Plugin<Context, HostConfig> = {
           signIn: currentSignIn,
           listedModels: async () => listedCodexModels(await data.dir().catch(() => null)),
           offeredModels,
-          // The pane's model pick becomes Settings → Codex's default.
+          // The pane's model and effort picks become Settings → Codex's defaults.
           saveSettings: async (patch) => {
             const parsed = codexSettingsPatch(patch);
             if ("error" in parsed) throw new AgentError(400, parsed.error);
