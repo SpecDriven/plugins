@@ -30,11 +30,15 @@ export function narrowModels<T extends MenuRow>(all: readonly T[], listed: reado
 }
 
 /**
- * Whether a model is one the data repo lists: a listed name, or the same
- * model under its other name — an alias whose id is listed, or the id of a
- * listed alias — as the full list pairs them. An empty list holds any model.
+ * Whether a model is on the menu: a row of the full list narrowed to the
+ * names the data repo lists, or the same model under its other name — an
+ * alias whose id is on it, or the id of an alias on it. A model the sign-in
+ * does not offer (one chosen under another sign-in) is not. With nothing
+ * offered there is nothing to hold it against: the listed names alone, and
+ * with none listed either, any model.
  */
 export function inList(model: string, all: readonly MenuRow[], listed: readonly string[]): boolean {
-  if (listed.length === 0 || listed.includes(model)) return true;
+  if (listed.includes(model)) return true;
+  if (all.length === 0) return listed.length === 0;
   return narrowModels(all, listed).some((m) => m.value === model || m.resolvedModel === model);
 }

@@ -352,11 +352,11 @@ export function DefaultModel({
     // repo lists when it lists any. What a new Claude starts on: the
     // chosen one, else the menu's first.
     const menu: AccountModel[] = narrowModels(account, models ?? []).map((m) => ({ description: "", ...m }));
-    // A default the list does not hold is not used: the menu's first is.
+    // A default the menu does not hold — left off the list, or chosen under
+    // another sign-in — is not used: the menu's first is.
     const shown = draft && inList(draft, account, models ?? []) ? draft : menu[0]!.value;
-    // With nothing listed, a default the account does not offer stays on
-    // offer after the menu — the offered row when there is one, so it
-    // keeps its name.
+    // A default held under its other name (an id the menu shows by alias)
+    // stays on offer after the menu, named after the row it resolves to.
     const options = menu.some((m) => m.value === shown)
       ? menu
       : [...menu, account.find((m) => m.value === shown) ?? { value: shown, displayName: shown, description: "" }];

@@ -45220,8 +45220,10 @@ function narrowModels(all, listed) {
   return out;
 }
 function inList(model, all, listed) {
-  if (listed.length === 0 || listed.includes(model))
+  if (listed.includes(model))
     return true;
+  if (all.length === 0)
+    return listed.length === 0;
   return narrowModels(all, listed).some((m2) => m2.value === model || m2.resolvedModel === model);
 }
 
@@ -46000,7 +46002,7 @@ function createClaudeProvider(options = {}) {
   const defaultModel = async (own) => {
     const listed = await listedModels();
     const set2 = own.defaultModel;
-    if (set2 && (listed.length === 0 || listed.includes(set2)))
+    if (set2 && listed.includes(set2))
       return set2;
     if (set2) {
       const offered = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => []);
@@ -46642,5 +46644,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=CD30376A0011132264756E2164756E21
+//# debugId=CEB6EF8944F0759164756E2164756E21
 //# sourceMappingURL=host.js.map

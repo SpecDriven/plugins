@@ -1085,14 +1085,13 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
   const settings = options.settings ?? (async () => DEFAULT_SETTINGS);
   const token = options.token ?? (async () => null);
   const listedModels = options.listedModels ?? (async () => []);
-  /** No model asked for: the default Settings names while the data repo's
-      list for Claude holds it, else the first that list names, else none —
-      Claude Code's own. The offered models pair aliases with ids, asked for
-      only when the default is not listed by name. */
+  /** No model asked for: the default Settings names while the sign-in offers
+      it and the data repo's list for Claude holds it, else the first that
+      list names, else none — Claude Code's own. */
   const defaultModel = async (own: ClaudeSettingsValues) => {
     const listed = await listedModels();
     const set = own.defaultModel;
-    if (set && (listed.length === 0 || listed.includes(set))) return set;
+    if (set && listed.includes(set)) return set;
     if (set) {
       const offered = await (options.accountModels?.() ?? Promise.resolve([])).catch(() => [] as AccountModel[]);
       if (inList(set, offered, listed)) return set;
