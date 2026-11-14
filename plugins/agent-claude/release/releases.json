@@ -2,6 +2,16 @@
   "plugin": "agent-claude",
   "releases": [
     {
+      "version": "1.19.2",
+      "file": "agent-claude-1.19.2.zip",
+      "sha256": "5573e4788efb63a0150e406d806cd901c83e398c5f9b634a7cedf70f4c03876b",
+      "size": 512464,
+      "date": "2026-11-14",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "The context meter moves while a turn goes on: each request that fills the window is counted"
+    },
+    {
       "version": "1.19.1",
       "file": "agent-claude-1.19.1.zip",
       "sha256": "9186921cd0edf772b8db11490e4f957663c9e33be862685ea890ab43dfe590e2",
@@ -90,16 +100,6 @@
       "api": "1",
       "minAppVersion": "0.1.196",
       "notes": "The account's own models, and the sign-in finishes in the browser"
-    },
-    {
-      "version": "1.13.0",
-      "file": "agent-claude-1.13.0.zip",
-      "sha256": "11d38bb36b1673bc567a45b11ae199b50aa701d3c55cfc8c3c88db2ca1c278e3",
-      "size": 510211,
-      "date": "2026-11-06",
-      "api": "1",
-      "minAppVersion": "0.1.196",
-      "notes": "Property tests for Claude's sign-in, and the five bugs they found"
     }
   ]
 }

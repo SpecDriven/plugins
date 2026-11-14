@@ -915,18 +915,26 @@ class ClaudeSession implements AgentSession {
       }
       return;
     }
+    // A request of the turn's own that filled the window further: worth a
+    // count while the turn goes on, so the meter moves with it.
+    let windowGrew = false;
     if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
       const tokens = tokensInWindow(msg.message.usage);
-      if (tokens !== null && tokens > 0) this.lastWindowTokens = tokens;
+      if (tokens !== null && tokens > 0 && tokens !== this.lastWindowTokens) {
+        this.lastWindowTokens = tokens;
+        windowGrew = true;
+      }
     }
     for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream)) this.emit(body);
     if (msg.type === "result") {
       this.contextWindow = contextWindowOf(msg.modelUsage, this.model) ?? this.contextWindow;
       this.host.turnEnded();
-      // Counted once the composer is free again, not before.
+      // The turn's last word on the window, once the composer is free again.
       this.countContext();
       this.refreshIfWanted();
     } else if (msg.type === "system" && msg.subtype === "compact_boundary") {
+      this.countContext();
+    } else if (windowGrew) {
       this.countContext();
     }
   }
