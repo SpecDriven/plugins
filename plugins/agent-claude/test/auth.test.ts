@@ -438,9 +438,12 @@ test("startLogin drives claude auth login, hands the page the url, and is done o
   expect(said("sign-in CLI exited").at(-1)).toContain("exit=0");
   expect(said("sign-in done").at(-1)).toContain('email="ada@example.com"');
 
+  // The memory log is the whole test process's: a file run before this one
+  // (the sign-in property tests, first on Linux) may have signed out too.
+  const signedOutBefore = said("signed out").length;
   await logout();
   expect((await loginStatus()).loggedIn).toBe(false);
-  expect(said("signed out").length).toBe(1);
+  expect(said("signed out").length).toBe(signedOutBefore + 1);
 });
 
 test("a sign-in can be cancelled, and a bad email or a platform with no Claude Code is refused", async () => {
