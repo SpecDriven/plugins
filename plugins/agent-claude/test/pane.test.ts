@@ -1655,7 +1655,17 @@ test("Claude Code's context count becomes the pane's slices, with what each is m
   expect(contextWindowOf({}, null)).toBeNull();
 });
 
-test.if("refreshChatContext" in engine)("Claude counts its context once ready and after every turn, and Refresh measures it", async () => {
+/** A top-level reply block that says what its request carried into the window. */
+const assistantUsing = (id: string, content: unknown[], inputTokens: number) =>
+  sdk({
+    type: "assistant",
+    message: { id, type: "message", role: "assistant", model: "claude-opus-5", content, stop_reason: null, usage: { input_tokens: inputTokens, output_tokens: 10 } },
+    parent_tool_use_id: null,
+    uuid: "u-a",
+    session_id: "claude-1",
+  });
+
+test.if("refreshChatContext" in engine)("Claude counts its context once ready, as a turn fills the window and after it, and Refresh measures it", async () => {
   fakeContext = async () => ANSWER;
   const { id, fake } = await idleSession();
   // Counted once the session is ready: the cheap count.
@@ -1663,9 +1673,20 @@ test.if("refreshChatContext" in engine)("Claude counts its context once ready an
   expect(contextOf(first.meta)).toMatchObject({ totalTokens: 11_733, maxTokens: 200_000, detail: "estimate" });
   expect(fake.contextAsks).toEqual(["summary"]);
 
-  // After a turn, once the composer is free again.
-  fakeContext = async () => ({ ...ANSWER, totalTokens: 40_000 });
+  // While the turn goes on: each request that fills the window further.
+  fakeContext = async () => ({ ...ANSWER, totalTokens: 25_000 });
   expect((await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" })).status).toBe(200);
+  fake.emit(assistantUsing("m0", [{ type: "text", text: "Looking." }], 24_990));
+  const during = await until(() => snapshot(id), (s) => contextOf(s.meta)?.totalTokens === 25_000);
+  expect(during.meta.status).toBe("running");
+  expect(fake.contextAsks).toEqual(["summary", "summary"]);
+  // Another block of the same request is not counted again.
+  fake.emit(assistantUsing("m0", [{ type: "text", text: "Still looking." }], 24_990));
+  await until(() => snapshot(id), (s) => JSON.stringify(s.events).includes("Still looking."));
+  expect(fake.contextAsks).toEqual(["summary", "summary"]);
+
+  // After the turn, once the composer is free again.
+  fakeContext = async () => ({ ...ANSWER, totalTokens: 40_000 });
   fake.emit(assistant("m1", [{ type: "text", text: "Hi." }]));
   fake.emit(result());
   const after = await until(() => snapshot(id), (s) => contextOf(s.meta)?.totalTokens === 40_000);
@@ -1673,7 +1694,7 @@ test.if("refreshChatContext" in engine)("Claude counts its context once ready an
   const kinds: string[] = after.events.map((e) => e.kind);
   expect(kinds.lastIndexOf("context")).toBeGreaterThan(kinds.lastIndexOf("result"));
   expect(kinds.filter((k) => k === "context")).toHaveLength(1);
-  expect(fake.contextAsks).toEqual(["summary", "summary"]);
+  expect(fake.contextAsks).toEqual(["summary", "summary", "summary"]);
 
   // A compaction changes the count: Claude says so, and it is counted again.
   fakeContext = async () => ({ ...ANSWER, totalTokens: 15_000 });
@@ -1718,8 +1739,11 @@ test.if("refreshChatContext" in engine)("a Claude Code that cannot count its con
       session_id: "claude-1",
     }),
   );
+  // Counted as the turn goes on, of a window not yet known.
+  const during = await until(() => snapshot(id), (v) => contextOf(v.meta) !== undefined);
+  expect(contextOf(during.meta)).toMatchObject({ totalTokens: 21_500, maxTokens: null, detail: "estimate" });
   fake.emit(result({ modelUsage: { "claude-opus-5": { contextWindow: 200_000 } } }));
-  const s = await until(() => snapshot(id), (v) => contextOf(v.meta) !== undefined);
+  const s = await until(() => snapshot(id), (v) => contextOf(v.meta)?.maxTokens === 200_000);
   expect(contextOf(s.meta)).toMatchObject({ model: "claude-opus-5", totalTokens: 21_500, maxTokens: 200_000, detail: "estimate" });
   expect(contextOf(s.meta)).not.toHaveProperty("slices");
   expect(fake.contextAsks).toHaveLength(1);

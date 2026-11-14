@@ -45895,10 +45895,13 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
       }
       return;
     }
+    let windowGrew = false;
     if (msg.type === "assistant" && msg.parent_tool_use_id === null) {
       const tokens = tokensInWindow(msg.message.usage);
-      if (tokens !== null && tokens > 0)
+      if (tokens !== null && tokens > 0 && tokens !== this.lastWindowTokens) {
         this.lastWindowTokens = tokens;
+        windowGrew = true;
+      }
     }
     for (const body of mapSdkMessage(msg, { turn: this.host.turn() }, this.stream))
       this.emit(body);
@@ -45908,6 +45911,8 @@ ${tail}` : e.message, this.initSeen ? "ended" : "spawn_failed");
       this.countContext();
       this.refreshIfWanted();
     } else if (msg.type === "system" && msg.subtype === "compact_boundary") {
+      this.countContext();
+    } else if (windowGrew) {
       this.countContext();
     }
   }
@@ -46637,5 +46642,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=B5B45956F8A19D1564756E2164756E21
+//# debugId=CD30376A0011132264756E2164756E21
 //# sourceMappingURL=host.js.map
