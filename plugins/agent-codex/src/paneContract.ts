@@ -5,22 +5,26 @@
 // types and simply never pass them.
 
 import type { AgentHost, AgentProvider, AgentStartOptions, ChatAccount } from "@specdriven/host";
+import type { EffortLevel } from "./modelMenu";
 
 // The composer bar's contract (SpecDriven 0.1.223 and later): the pane asks
-// an agent for its model menu and the model a new session starts on, and
-// switches a running session's model.
+// an agent for its model menu and the model and effort a new session starts
+// on, and switches a running session's model and effort.
 
 export interface AgentModelOption {
   value: string;
   displayName: string;
   description?: string;
+  /** The reasoning efforts the model takes; absent, the pane offers every
+      level and the session lowers one the model does not take. */
+  efforts?: EffortLevel[];
 }
 
 export interface AgentChoices {
   models: AgentModelOption[];
   model: string | null;
-  /** Codex's reasoning effort is not the pane's to pick. */
-  effort: null;
+  /** The reasoning effort a new session runs at; null, the model's own. */
+  effort: EffortLevel | null;
   /** The sign-in a new session would start under, for the pane header's
       account chip before any session has said (SpecDriven 0.1.249 and
       later read it; an older app ignores it). */
@@ -29,7 +33,7 @@ export interface AgentChoices {
 
 export interface AgentDefaultsPatch {
   model?: string | null;
-  effort?: unknown;
+  effort?: EffortLevel | null;
 }
 
 /** An image pasted into the pane's message: its bytes, base64, and the
@@ -50,11 +54,17 @@ export interface AgentMcpServer {
   env: Record<string, string>;
 }
 
-export type PaneStartOptions = AgentStartOptions & { model?: string; images?: PastedImage[]; mcpServers?: AgentMcpServer[] };
+export type PaneStartOptions = AgentStartOptions & {
+  model?: string;
+  effort?: EffortLevel;
+  images?: PastedImage[];
+  mcpServers?: AgentMcpServer[];
+};
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
   capabilities: AgentProvider["capabilities"] & {
     canChangeModelMidSession?: boolean;
+    effort?: boolean;
     images?: boolean;
     contextUsage?: "breakdown" | "totals";
   };

@@ -2,6 +2,16 @@
   "plugin": "agent-codex",
   "releases": [
     {
+      "version": "1.5.0",
+      "file": "agent-codex-1.5.0.zip",
+      "sha256": "3795a87fe5a0f5a55ab4455e6630c2a5a1eb57f3f259dadd804dc44fd56d6772",
+      "size": 29052,
+      "date": "2026-11-14",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "The coding agent pane's model chooser offers Codex's reasoning efforts: the levels each model takes, picked per session and kept as Settings → Codex's Default effort"
+    },
+    {
       "version": "1.4.0",
       "file": "agent-codex-1.4.0.zip",
       "sha256": "d3526c22db3602f98518e1e2f5ff8006113b814341f8dd27396a754ff451ee05",

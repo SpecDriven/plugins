@@ -156,19 +156,29 @@ function startApi(key: string | null = "sk-test-key"): { url: string; seen: { pa
 
 test("the stored choice is normalized; an address must be http(s), and loses its trailing slash", () => {
   expect(codexSettingsOf({})).toEqual(DEFAULT_SETTINGS);
-  expect(codexSettingsOf({ codexAuth: "api", codexApiUrl: " https://api.test/v1/ ", defaultModel: " gpt-test " })).toEqual({
+  expect(
+    codexSettingsOf({ codexAuth: "api", codexApiUrl: " https://api.test/v1/ ", defaultModel: " gpt-test ", defaultEffort: "high" }),
+  ).toEqual({
     codexAuth: "api",
     codexApiUrl: "https://api.test/v1",
     defaultModel: "gpt-test",
+    defaultEffort: "high",
   });
-  expect(codexSettingsOf({ codexAuth: "ldap", codexApiUrl: "localhost:6655", defaultModel: "two words" })).toEqual(DEFAULT_SETTINGS);
+  expect(
+    codexSettingsOf({ codexAuth: "ldap", codexApiUrl: "localhost:6655", defaultModel: "two words", defaultEffort: "ultra" }),
+  ).toEqual(DEFAULT_SETTINGS);
   expect(codexSettingsPatch({ codexAuth: "login" })).toEqual({ patch: { codexAuth: "login" } });
   expect(codexSettingsPatch({ codexAuth: null, codexApiUrl: "", defaultModel: "" })).toEqual({
     patch: { codexAuth: null, codexApiUrl: null, defaultModel: null },
   });
   expect(codexSettingsPatch({ codexAuth: "proxy" })).toEqual({ error: "codexAuth must be login, api or null" });
   expect(codexSettingsPatch({ codexApiUrl: "ftp://api.test" })).toEqual({ error: "codexApiUrl must be an http:// or https:// url" });
-  expect(codexSettingsPatch({})).toEqual({ error: "codexAuth, codexApiUrl or defaultModel is required" });
+  expect(codexSettingsPatch({ defaultEffort: "xhigh" })).toEqual({ patch: { defaultEffort: "xhigh" } });
+  expect(codexSettingsPatch({ defaultEffort: null })).toEqual({ patch: { defaultEffort: null } });
+  expect(codexSettingsPatch({ defaultEffort: "minimal" })).toEqual({
+    error: "defaultEffort must be low, medium, high, xhigh, max or null",
+  });
+  expect(codexSettingsPatch({})).toEqual({ error: "codexAuth, codexApiUrl, defaultModel or defaultEffort is required" });
 });
 
 // --- what Codex's own config says ----------------------------------------------
@@ -433,17 +443,23 @@ test("GET /api/codex/auth reports the mode, the ChatGPT login and the API — ne
   expect(removed.body.api).toMatchObject({ storedKey: false, hasKey: true });
 });
 
-test("PUT /api/codex/settings stores the choice, the address and the model, and null forgets them", async () => {
+test("PUT /api/codex/settings stores the choice, the address, the model and the effort, and null forgets them", async () => {
   const chosen = await call("PUT", "/api/codex/settings", { codexAuth: "login" });
-  expect(chosen.body).toEqual({ codexAuth: "login", codexApiUrl: null, defaultModel: null });
+  expect(chosen.body).toEqual({ codexAuth: "login", codexApiUrl: null, defaultModel: null, defaultEffort: null });
   expect((await call("GET", "/api/codex/auth")).body).toMatchObject({ mode: "login", inferred: false });
   expect((await call("PUT", "/api/codex/settings", { codexAuth: "proxy" })).status).toBe(400);
   expect((await call("PUT", "/api/codex/settings", { codexApiUrl: "localhost:6655" })).status).toBe(400);
-  const api = await call("PUT", "/api/codex/settings", { codexAuth: "api", codexApiUrl: " http://api.test:9/v1/ ", defaultModel: "gpt-test" });
-  expect(api.body).toEqual({ codexAuth: "api", codexApiUrl: "http://api.test:9/v1", defaultModel: "gpt-test" });
+  expect((await call("PUT", "/api/codex/settings", { defaultEffort: "ultra" })).status).toBe(400);
+  const api = await call("PUT", "/api/codex/settings", {
+    codexAuth: "api",
+    codexApiUrl: " http://api.test:9/v1/ ",
+    defaultModel: "gpt-test",
+    defaultEffort: "high",
+  });
+  expect(api.body).toEqual({ codexAuth: "api", codexApiUrl: "http://api.test:9/v1", defaultModel: "gpt-test", defaultEffort: "high" });
   expect((await call("GET", "/api/codex/settings")).body).toEqual(api.body);
-  const forgotten = await call("PUT", "/api/codex/settings", { codexAuth: null, codexApiUrl: null, defaultModel: null });
-  expect(forgotten.body).toEqual({ codexAuth: null, codexApiUrl: null, defaultModel: null });
+  const forgotten = await call("PUT", "/api/codex/settings", { codexAuth: null, codexApiUrl: null, defaultModel: null, defaultEffort: null });
+  expect(forgotten.body).toEqual({ codexAuth: null, codexApiUrl: null, defaultModel: null, defaultEffort: null });
 });
 
 test("the sign-in routes refuse in the demo and the hosted app", async () => {

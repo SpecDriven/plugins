@@ -596,10 +596,41 @@ function codexMcpArgs(servers) {
   return servers.flatMap((s) => ["-c", `mcp_servers.${tomlKey(s.name)}=${tomlServer(s)}`]);
 }
 
+// plugins/agent-codex/src/modelMenu.ts
+var EFFORT_LEVELS2 = ["low", "medium", "high", "xhigh", "max"];
+function normalizeEffort2(value) {
+  return EFFORT_LEVELS2.includes(value) ? value : null;
+}
+function paneEfforts(names) {
+  return EFFORT_LEVELS2.filter((level) => names.includes(level));
+}
+function effortFor(level, model) {
+  const takes = model?.efforts;
+  if (!takes)
+    return level;
+  if (takes.length === 0)
+    return null;
+  if (takes.includes(level))
+    return level;
+  const rank = EFFORT_LEVELS2.indexOf(level);
+  const below = takes.filter((e) => EFFORT_LEVELS2.indexOf(e) < rank);
+  return below.at(-1) ?? takes[0];
+}
+function narrowModels(all, listed) {
+  if (listed.length === 0)
+    return [...all];
+  return listed.map((name) => all.find((m2) => m2.value === name) ?? { value: name, displayName: name, description: "" });
+}
+
 // plugins/agent-codex/src/settings.ts
 var CODEX_AUTH_MODES = ["login", "api"];
 var OPENAI_API_URL = "https://api.openai.com/v1";
-var DEFAULT_SETTINGS = { codexAuth: null, codexApiUrl: null, defaultModel: null };
+var DEFAULT_SETTINGS = {
+  codexAuth: null,
+  codexApiUrl: null,
+  defaultModel: null,
+  defaultEffort: null
+};
 var MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,199}$/;
 function normalizeModel2(value) {
   if (typeof value !== "string")
@@ -627,7 +658,8 @@ function codexSettingsOf(section) {
   return {
     codexAuth: normalizeCodexAuth(section.codexAuth),
     codexApiUrl: normalizeCodexApiUrl(section.codexApiUrl),
-    defaultModel: normalizeModel2(section.defaultModel)
+    defaultModel: normalizeModel2(section.defaultModel),
+    defaultEffort: normalizeEffort2(section.defaultEffort)
   };
 }
 function codexSettingsPatch(body) {
@@ -664,8 +696,15 @@ function codexSettingsPatch(body) {
       return { error: "Enter a model id, with no spaces" };
     patch.defaultModel = model || null;
   }
-  if (Object.keys(patch).length === 0)
-    return { error: "codexAuth, codexApiUrl or defaultModel is required" };
+  if (b.defaultEffort !== undefined) {
+    const effort = normalizeEffort2(b.defaultEffort);
+    if (b.defaultEffort !== null && !effort)
+      return { error: "defaultEffort must be low, medium, high, xhigh, max or null" };
+    patch.defaultEffort = effort;
+  }
+  if (Object.keys(patch).length === 0) {
+    return { error: "codexAuth, codexApiUrl, defaultModel or defaultEffort is required" };
+  }
   return { patch };
 }
 
@@ -1079,6 +1118,14 @@ async function fetchApiModels(url, key, fetchFn = fetch, timeoutMs = API_MODELS_
   const body = await res.json().catch(() => null);
   return apiModelsOf(Array.isArray(body) ? body : body?.data);
 }
+function effortsOf(options, fallback, field) {
+  if (!Array.isArray(options))
+    return {};
+  const names = options.map((o) => o && typeof o === "object" ? o[field] : null);
+  const efforts = paneEfforts(names);
+  const defaultEffort = normalizeEffort2(fallback);
+  return { efforts, ...defaultEffort && efforts.includes(defaultEffort) ? { defaultEffort } : {} };
+}
 function accountModelsOf(rows) {
   const models = [];
   if (!Array.isArray(rows))
@@ -1090,10 +1137,51 @@ function accountModelsOf(rows) {
     models.push({
       value,
       displayName: typeof row.displayName === "string" && row.displayName ? row.displayName : value,
-      description: typeof row.description === "string" ? row.description : ""
+      description: typeof row.description === "string" ? row.description : "",
+      ...effortsOf(row.supportedReasoningEfforts, row.defaultReasoningEffort, "reasoningEffort")
     });
   }
   return models;
+}
+function catalogEffortsOf(catalog) {
+  const byModel = new Map;
+  const rows = catalog?.models;
+  if (!Array.isArray(rows))
+    return byModel;
+  for (const row of rows) {
+    const value = normalizeModel2(row?.slug);
+    if (!value || byModel.has(value))
+      continue;
+    byModel.set(value, { efforts: [], ...effortsOf(row.supported_reasoning_levels, row.default_reasoning_level, "effort") });
+  }
+  return byModel;
+}
+function withCatalogEfforts(models, catalog) {
+  if (catalog.size === 0)
+    return [...models];
+  return models.map((m2) => ({ ...m2, ...catalog.get(m2.value) ?? { efforts: [] } }));
+}
+var catalogRead = null;
+function codexCatalog(runner = run) {
+  if (runner !== run)
+    return readCatalog(runner);
+  catalogRead ??= readCatalog(run).then((m2) => {
+    if (m2.size === 0)
+      catalogRead = null;
+    return m2;
+  });
+  return catalogRead;
+}
+async function readCatalog(runner) {
+  const bin = runner === run ? which(CODEX_BIN) : CODEX_BIN;
+  if (!bin)
+    return new Map;
+  try {
+    const result = await runner(bin, ["debug", "models", "--bundled"], { env: process.env });
+    return result.exitCode === 0 ? catalogEffortsOf(JSON.parse(result.stdout)) : new Map;
+  } catch {
+    return new Map;
+  }
 }
 var ACCOUNT_MODELS_TIMEOUT_MS = 15000;
 async function fetchAccountModels(cwd = process.cwd()) {
@@ -1175,13 +1263,6 @@ async function listedCodexModels(dataDir) {
   if (!Array.isArray(list))
     return [];
   return list.map(normalizeModel2).filter((m2) => m2 !== null);
-}
-
-// plugins/agent-codex/src/modelMenu.ts
-function narrowModels(all, listed) {
-  if (listed.length === 0)
-    return [...all];
-  return listed.map((name) => all.find((m2) => m2.value === name) ?? { value: name, displayName: name, description: "" });
 }
 
 // plugins/agent-codex/src/oneShot.ts
@@ -1407,6 +1488,7 @@ class CodexSession {
   cwd;
   startModel;
   account;
+  modelInfo;
   client = null;
   stream = newCodexStream();
   requests = new Map;
@@ -1416,13 +1498,19 @@ class CodexSession {
   model = null;
   lastCount = null;
   nextModel = null;
-  constructor(host, name, cwd, mode, startModel = null, account = null) {
+  effort;
+  sentEffort = null;
+  constructor(host, name, cwd, mode, startModel = null, account = null, effort = null, modelInfo = async () => {
+    return;
+  }) {
     this.host = host;
     this.name = name;
     this.cwd = cwd;
     this.startModel = startModel;
     this.account = account;
+    this.modelInfo = modelInfo;
     this.mode = mode;
+    this.effort = effort;
   }
   get final() {
     return this.host.status() === "ended" || this.host.status() === "error";
@@ -1468,6 +1556,7 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
     this.host.ready({
       agentSessionId: info.threadId,
       ...info.model ? { model: info.model } : {},
+      ...this.effort ? { effort: this.effort } : {},
       ...this.account ? { account: this.account } : {}
     });
     if (prompt || images?.length) {
@@ -1479,17 +1568,30 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
       }
     }
   }
+  async turnEffort() {
+    if (!this.effort && !this.sentEffort)
+      return null;
+    const model = this.nextModel ?? this.model;
+    const info = model ? await this.modelInfo(model) : undefined;
+    if (this.effort)
+      return effortFor(this.effort, info);
+    return info?.defaultEffort ?? null;
+  }
   async send(text2, images) {
     const client = this.client;
     if (!this.threadId || this.final)
       return;
     const policy = codexPolicy(this.mode);
+    const effort = await this.turnEffort();
+    if (this.final)
+      return;
     const res = await client.request("turn/start", {
       threadId: this.threadId,
       input: codexTextInput(text2, images?.map((image) => image.path)),
       approvalPolicy: policy.approvalPolicy,
       sandboxPolicy: codexSandboxPolicy(policy.sandbox),
-      ...this.nextModel ? { model: this.nextModel } : {}
+      ...this.nextModel ? { model: this.nextModel } : {},
+      ...effort ? { effort } : {}
     });
     if (this.final)
       return;
@@ -1499,6 +1601,8 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
       this.model = this.nextModel;
       this.nextModel = null;
     }
+    if (effort)
+      this.sentEffort = this.effort ? effort : null;
     const turn = rec(res.result.turn);
     const turnId = turn ? str(turn.id) : null;
     if (turnId && this.stream.turnId === null)
@@ -1524,6 +1628,13 @@ ${tail}` : `Could not start Codex: ${why}`, "spawn_failed");
     this.nextModel = next && next !== this.model ? next : null;
     if (this.host.busy())
       this.host.note("info", "api", "The new model applies from the next turn.");
+  }
+  async setEffort(effort) {
+    if (this.host.status() === "starting")
+      throw new AgentError(409, "Codex is still starting");
+    this.effort = effort;
+    if (this.host.busy())
+      this.host.note("info", "api", "The new effort applies from the next turn.");
   }
   close() {
     this.client?.close();
@@ -1735,7 +1846,7 @@ function createCodexProvider(options = {}) {
       hasAccount: options.signIn !== undefined,
       rememberPermissions: "session",
       oneShot: true,
-      ...menus ? { canChangeModelMidSession: true } : {},
+      ...menus ? { canChangeModelMidSession: true, effort: true } : {},
       images: true,
       contextUsage: "totals"
     },
@@ -1749,7 +1860,8 @@ function createCodexProvider(options = {}) {
         return;
       });
       const model = opts.model ?? (menus ? await defaultModel() : null);
-      const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode, model, account ?? null);
+      const effort = menus ? opts.effort ?? (await settings()).defaultEffort : null;
+      const session = new CodexSession(opts.host, opts.name, opts.cwd, opts.permissionMode, model, account ?? null, effort, async (id) => (await offered()).find((m2) => m2.value === id));
       const extraArgs = [...run2.args, ...opts.mcpServers?.length ? codexMcpArgs(opts.mcpServers) : []];
       session.client = new CodexClient({
         cwd: opts.cwd,
@@ -1778,19 +1890,29 @@ function createCodexProvider(options = {}) {
         const models = narrowModels(await offered(), await listedModels()).map((m2) => ({
           value: m2.value,
           displayName: m2.displayName,
-          ...m2.description ? { description: m2.description } : {}
+          ...m2.description ? { description: m2.description } : {},
+          ...m2.efforts ? { efforts: m2.efforts } : {}
         }));
         const account = await options.signIn?.().catch(() => {
           return;
         });
-        return { models, model: await defaultModel(), effort: null, ...account ? { account } : {} };
+        return {
+          models,
+          model: await defaultModel(),
+          effort: (await settings()).defaultEffort,
+          ...account ? { account } : {}
+        };
       },
       async setDefaults(patch) {
-        if (patch.model === undefined)
+        const saved = {
+          ...patch.model !== undefined ? { defaultModel: patch.model } : {},
+          ...patch.effort !== undefined ? { defaultEffort: patch.effort } : {}
+        };
+        if (Object.keys(saved).length === 0)
           return;
         if (!options.saveSettings)
           throw new AgentError(409, "Codex keeps no defaults here");
-        await options.saveSettings({ defaultModel: patch.model });
+        await options.saveSettings(saved);
       },
       async reportedModels() {
         const models = await offered();
@@ -1836,6 +1958,7 @@ function codexAuthView(auth, login, own) {
       }
     },
     defaultModel: own.defaultModel,
+    defaultEffort: own.defaultEffort,
     signIn: loginState()
   };
 }
@@ -1888,7 +2011,7 @@ var plugin = {
       if (!auth.api)
         return [];
       const { url, key } = auth.api;
-      return offeredModels(() => fetchApiModels(url, key), `api
+      return offeredModels(async () => withCatalogEfforts(await fetchApiModels(url, key), await codexCatalog()), `api
 ${url}
 ${key ?? ""}`);
     };
@@ -2028,5 +2151,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=D1CB85A2EA45147964756E2164756E21
+//# debugId=F728BDA87D922F4764756E2164756E21
 //# sourceMappingURL=host.js.map

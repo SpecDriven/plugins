@@ -29,6 +29,7 @@ import {
 } from "../src/codexChat";
 import type { CodexSpawnOptions } from "../src/codexChat";
 import { ACCOUNT_ARGS, setLoginStatus } from "../src/auth";
+import { forgetModels } from "../src/models";
 import { setCodexAvailability } from "../src/cli";
 import { codexMcpArgs, tomlString } from "../src/mcpConfig";
 import { mountPlugin, quietProfile } from "./app";
@@ -450,6 +451,26 @@ class FakeCodex {
       case "thread/name/set":
         this.emit({ id, result: {} });
         return;
+      case "model/list":
+        // Codex's list for the account: gpt-5.5 takes low to xhigh, medium by default.
+        this.emit({
+          id,
+          result: {
+            data: [
+              {
+                id: "gpt-5.5",
+                model: "gpt-5.5",
+                displayName: "GPT-5.5",
+                description: "",
+                hidden: false,
+                supportedReasoningEfforts: ["low", "medium", "high", "xhigh"].map((e) => ({ reasoningEffort: e, description: "" })),
+                defaultReasoningEffort: "medium",
+              },
+            ],
+            nextCursor: null,
+          },
+        });
+        return;
       case "turn/start": {
         const turn = { id: `turn-${this.allSent("turn/start").length}`, status: "inProgress", items: [], error: null };
         this.emit({ id, result: { turn } });
@@ -499,6 +520,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await endAllChatSessions();
+  forgetModels();
   await unmount();
   reloader.stop();
   setCodexAvailability(null);
@@ -626,6 +648,47 @@ test("a session starts on the model Settings → Codex names, and reports the si
     label: "ChatGPT account",
     detail: "ChatGPT account · pat@example.com",
   });
+});
+
+/** The session's effort, which an app before 0.1.223 has no field for. */
+const effortOf = (meta: ChatSessionMeta) => (meta as { effort?: string }).effort;
+
+// The pane's effort row (SpecDriven 0.1.223 and later); an older app hands no effort.
+test.if("setChatEffort" in engine)("a session runs at the effort Settings → Codex names, lowered to one its model takes, and the pane's pick goes with the next turn", async () => {
+  expect((await api("/api/codex/settings", "PUT", { defaultEffort: "max" })).status).toBe(200);
+  const { id, codex } = await idleCodexSession();
+  expect(effortOf((await snapshot(id)).meta)).toBe("max");
+  // Effort travels with turns, not with the thread.
+  expect(codex.sent("thread/start")!.params).not.toHaveProperty("effort");
+  const turn = async (text: string) => {
+    expect((await api(`/api/agent/chat/${id}/message`, "POST", { text })).status).toBe(200);
+    const sent = await until(async () => codex.allSent("turn/start"), (all) => all.some((r) => JSON.stringify(r).includes(text)));
+    const params = sent.at(-1)!.params as Record<string, unknown>;
+    codex.notify("turn/completed", {
+      threadId: "thread-1",
+      turn: { id: `turn-${sent.length}`, status: "completed", error: null, durationMs: 10 },
+    });
+    await untilStatus(id, "idle");
+    return params.effort;
+  };
+  // gpt-5.5 takes low to xhigh: max is lowered to xhigh.
+  expect(await turn("first")).toBe("xhigh");
+  // The pane's pick goes with the next turn, and becomes the default.
+  expect((await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: "low" })).status).toBe(200);
+  expect(await turn("second")).toBe("low");
+  expect((await (await api("/api/codex/settings")).json()).defaultEffort).toBe("low");
+  // Back on the model's own: one turn asks for its default, since Codex
+  // keeps the last effort it was given; the turns after ask for none.
+  expect((await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: null })).status).toBe(200);
+  expect(await turn("third")).toBe("medium");
+  expect(await turn("fourth")).toBeUndefined();
+});
+
+test("with no effort picked, turns ask Codex for none", async () => {
+  const { id, codex } = await idleCodexSession();
+  expect(effortOf((await snapshot(id)).meta)).toBeUndefined();
+  expect((await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" })).status).toBe(200);
+  expect(codex.sent("turn/start")!.params).not.toHaveProperty("effort");
 });
 
 test("a turn goes to Codex as turn/start and its items stream into the log", async () => {

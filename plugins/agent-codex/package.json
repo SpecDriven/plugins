@@ -1,6 +1,6 @@
 {
   "name": "@specdriven/plugin-agent-codex",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "license": "Apache-2.0",
   "description": "OpenAI's Codex CLI in the coding agent pane, with permission cards for commands and file changes, and its sign-in (your ChatGPT account or the API) in Settings",
   "type": "module",

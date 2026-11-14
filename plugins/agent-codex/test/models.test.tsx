@@ -11,23 +11,27 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { modelLabel, narrowModels, type CodexModel } from "../src/modelMenu";
+import { effortFor, modelLabel, narrowModels, paneEfforts, type CodexModel } from "../src/modelMenu";
 import {
   AGENT_MODELS_FILE,
   CODEX_MODELS_FILE,
   MODELS_TTL_MS,
   accountModelsOf,
   apiModelsOf,
+  catalogEffortsOf,
+  codexCatalog,
   fetchApiModels,
   forgetModels,
   listedCodexModels,
   offeredModels,
+  withCatalogEfforts,
 } from "../src/models";
 import { createCodexProvider } from "../src/provider";
 import { DEFAULT_SETTINGS } from "../src/settings";
 import {
   CodexAccount,
   CodexApi,
+  DefaultEffort,
   DefaultModel,
   apiCheckText,
   codexModelsOf,
@@ -92,6 +96,72 @@ test("a ChatGPT account's models are Codex's own list for it, the hidden ones le
   expect(accountModelsOf(null)).toEqual([]);
 });
 
+// --- the reasoning efforts each model takes -------------------------------------
+
+test("a ChatGPT account's models carry the efforts Codex lists for each, as the pane's levels", () => {
+  const rows = [
+    {
+      model: "gpt-a",
+      displayName: "GPT-A",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "xhigh", description: "" },
+        { reasoningEffort: "low", description: "" },
+        { reasoningEffort: "ultra", description: "" },
+        { reasoningEffort: "medium", description: "" },
+      ],
+      defaultReasoningEffort: "medium",
+    },
+    // A model that takes none, and one whose default the pane has no level for.
+    { model: "gpt-b", supportedReasoningEfforts: [], defaultReasoningEffort: "none" },
+    { model: "gpt-c", supportedReasoningEfforts: [{ reasoningEffort: "minimal" }, { reasoningEffort: "max" }], defaultReasoningEffort: "minimal" },
+  ];
+  expect(accountModelsOf(rows)).toEqual([
+    { value: "gpt-a", displayName: "GPT-A", description: "", efforts: ["low", "medium", "xhigh"], defaultEffort: "medium" },
+    { value: "gpt-b", displayName: "gpt-b", description: "", efforts: [] },
+    { value: "gpt-c", displayName: "gpt-c", description: "", efforts: ["max"] },
+  ]);
+  expect(paneEfforts(["high", "low", "none"])).toEqual(["low", "high"]);
+});
+
+test("an API's models take the efforts Codex's own catalog gives them, and none for a model it does not know", async () => {
+  const catalog = catalogEffortsOf({
+    models: [
+      {
+        slug: "gpt-test",
+        supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }],
+        default_reasoning_level: "medium",
+      },
+      { slug: "gpt-other", supported_reasoning_levels: [{ effort: "max" }] },
+    ],
+  });
+  expect(withCatalogEfforts(API_MODELS, catalog)).toEqual([
+    { value: "gpt-test", displayName: "gpt-test", description: "", efforts: ["low", "medium", "high"], defaultEffort: "medium" },
+    { value: "gpt-test-mini", displayName: "gpt-test-mini", description: "", efforts: [] },
+  ]);
+  // No catalog to read (no Codex, or one that cannot say): the rows say nothing of efforts.
+  expect(withCatalogEfforts(API_MODELS, catalogEffortsOf(null))).toEqual(API_MODELS);
+  // The catalog is `codex debug models --bundled`: offline, and under no sign-in.
+  const asked: string[][] = [];
+  const read = await codexCatalog(async (_cmd, args) => {
+    asked.push(args);
+    return { exitCode: 0, stdout: JSON.stringify({ models: [{ slug: "gpt-test", supported_reasoning_levels: [{ effort: "high" }] }] }), stderr: "" };
+  });
+  expect(asked).toEqual([["debug", "models", "--bundled"]]);
+  expect(read.get("gpt-test")).toEqual({ efforts: ["high"] });
+  expect((await codexCatalog(async () => ({ exitCode: 1, stdout: "", stderr: "unknown command" }))).size).toBe(0);
+});
+
+test("an effort a model does not take is lowered to the highest it takes below it, else its lowest", () => {
+  const takes = (efforts?: CodexModel["efforts"]) => ({ efforts });
+  expect(effortFor("high", takes(["low", "medium", "high", "xhigh"]))).toBe("high");
+  expect(effortFor("max", takes(["low", "medium", "high", "xhigh"]))).toBe("xhigh");
+  expect(effortFor("low", takes(["medium", "high"]))).toBe("medium");
+  // A model Codex sends no effort for gets none; one nothing is known of, the level picked.
+  expect(effortFor("high", takes([]))).toBeNull();
+  expect(effortFor("high", takes(undefined))).toBe("high");
+  expect(effortFor("high", undefined)).toBe("high");
+});
+
 test("the sign-in's models are asked for once per sign-in, kept a while, and asked again when it changes", async () => {
   let asks = 0;
   const ask = async () => {
@@ -148,21 +218,24 @@ test("the pane's model menu is what the sign-in offers, narrowed by the data rep
   const provider = createCodexProvider({
     settings: async () => own,
     listedModels: async () => listed,
-    offeredModels: async () => [{ value: "gpt-a", displayName: "GPT-A", description: "The workhorse" }, ...API_MODELS],
+    offeredModels: async () => [
+      { value: "gpt-a", displayName: "GPT-A", description: "The workhorse", efforts: ["low", "medium", "high"], defaultEffort: "medium" },
+      ...API_MODELS,
+    ],
     signIn: async () => ({ billing: "api", label: "API:LOCAL", detail: "API calls go to localhost:6655" }),
     saveSettings: async (patch) => {
       saved.push(patch);
     },
   });
-  expect(provider.capabilities).toMatchObject({ hasAccount: true, canChangeModelMidSession: true });
+  expect(provider.capabilities).toMatchObject({ hasAccount: true, canChangeModelMidSession: true, effort: true });
   const all = await provider.choices!({ dataRepo: null });
   expect(all).toEqual({
     models: [
-      { value: "gpt-a", displayName: "GPT-A", description: "The workhorse" },
+      { value: "gpt-a", displayName: "GPT-A", description: "The workhorse", efforts: ["low", "medium", "high"] },
       { value: "gpt-test", displayName: "gpt-test" },
       { value: "gpt-test-mini", displayName: "gpt-test-mini" },
     ],
-    // Nothing chosen, nothing listed: Codex's own default.
+    // Nothing chosen, nothing listed: Codex's own default model, at its own effort.
     model: null,
     effort: null,
     account: { billing: "api", label: "API:LOCAL", detail: "API calls go to localhost:6655" },
@@ -175,10 +248,13 @@ test("the pane's model menu is what the sign-in offers, narrowed by the data rep
   const narrowed = await provider.choices!({ dataRepo: null });
   expect(narrowed.models.map((m) => m.value)).toEqual(["gpt-test", "gpt-a"]);
   expect(narrowed.model).toBe("gpt-test");
+  own = { ...own, defaultEffort: "high" };
+  expect((await provider.choices!({ dataRepo: null })).effort).toBe("high");
   // A pick in the pane becomes Settings → Codex's default.
   await provider.setDefaults!({ model: "gpt-a" });
   await provider.setDefaults!({ effort: "high" });
-  expect(saved).toEqual([{ defaultModel: "gpt-a" }]);
+  await provider.setDefaults!({ effort: null });
+  expect(saved).toEqual([{ defaultModel: "gpt-a" }, { defaultEffort: "high" }, { defaultEffort: null }]);
 });
 
 test("a Codex with no Settings of its own offers no model menu and no account chip", () => {
@@ -187,6 +263,7 @@ test("a Codex with no Settings of its own offers no model menu and no account ch
   expect(plain.setDefaults).toBeUndefined();
   expect(plain.capabilities.hasAccount).toBe(false);
   expect(plain.capabilities.canChangeModelMidSession).toBeUndefined();
+  expect(plain.capabilities.effort).toBeUndefined();
 });
 
 // --- Settings → Codex ---------------------------------------------------------------
@@ -212,6 +289,18 @@ const modelHtml = (defaultModel: string | null, models: string[] | null, offered
   renderToStaticMarkup(
     <DefaultModel info={info({ defaultModel })} models={models} offered={offered} offeredBy={offeredBy} refresh={async () => {}} onError={() => {}} />,
   );
+
+test("Default effort is a select of the pane's levels, the model's own default when none is set", () => {
+  const effort = (defaultEffort: CodexAuthInfo["defaultEffort"]) =>
+    renderToStaticMarkup(<DefaultEffort info={{ defaultEffort }} refresh={async () => {}} onError={() => {}} />);
+  expect(effort(null)).toContain(
+    '<option value="" selected="">The model&#x27;s default</option><option value="low">Low</option><option value="medium">Medium</option>' +
+      '<option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option>',
+  );
+  expect(effort("xhigh")).toContain('<option value="xhigh" selected="">Extra high</option>');
+  // A host half from before the setting says nothing: the same as none.
+  expect(effort(undefined)).toContain('<option value="" selected="">');
+});
 
 test("Default model is a dropdown of the models the API lists, with Codex's own default until one is chosen", () => {
   const out = modelHtml(null, [], API_MODELS);

@@ -13,9 +13,11 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ACCOUNT_ARGS, SENDABLE_KEY, UNSENDABLE_KEY, modelsUrl, withoutKey } from "./auth";
+import { run, which } from "@specdriven/host";
+import { ACCOUNT_ARGS, SENDABLE_KEY, UNSENDABLE_KEY, modelsUrl, withoutKey, type Runner } from "./auth";
+import { CODEX_BIN } from "./cli";
 import { CODEX_CLIENT_INFO, CodexClient } from "./codexChat";
-import type { CodexModel } from "./modelMenu";
+import { normalizeEffort, paneEfforts, type CodexModel } from "./modelMenu";
 import { normalizeModel } from "./settings";
 
 export type { CodexModel } from "./modelMenu";
@@ -67,7 +69,19 @@ export async function fetchApiModels(
   return apiModelsOf(Array.isArray(body) ? body : body?.data);
 }
 
-/** Codex's own model rows (`model/list`) as menu rows, the hidden ones left out. */
+/** A model's efforts off Codex's list of them (`[{ reasoningEffort }]`
+    in `model/list`, `[{ effort }]` in the catalog) and its default; no
+    list, no efforts said. */
+function effortsOf(options: unknown, fallback: unknown, field: string): Pick<CodexModel, "efforts" | "defaultEffort"> {
+  if (!Array.isArray(options)) return {};
+  const names = options.map((o) => (o && typeof o === "object" ? (o as Record<string, unknown>)[field] : null));
+  const efforts = paneEfforts(names);
+  const defaultEffort = normalizeEffort(fallback);
+  return { efforts, ...(defaultEffort && efforts.includes(defaultEffort) ? { defaultEffort } : {}) };
+}
+
+/** Codex's own model rows (`model/list`) as menu rows, the hidden ones left
+    out, with the reasoning efforts each takes. */
 export function accountModelsOf(rows: unknown): CodexModel[] {
   const models: CodexModel[] = [];
   if (!Array.isArray(rows)) return models;
@@ -78,9 +92,66 @@ export function accountModelsOf(rows: unknown): CodexModel[] {
       value,
       displayName: typeof row.displayName === "string" && row.displayName ? row.displayName : value,
       description: typeof row.description === "string" ? row.description : "",
+      ...effortsOf(row.supportedReasoningEfforts, row.defaultReasoningEffort, "reasoningEffort"),
     });
   }
   return models;
+}
+
+// --- Efforts for an API's models ----------------------------------------------
+// An API's GET /models says nothing of reasoning. Codex's own catalog does:
+// the models it knows, and the efforts it sends each — `codex debug models
+// --bundled`, the catalog shipped with the CLI, read offline and with no
+// sign-in, so it signs no one out. A model the catalog lacks gets no effort
+// from Codex at all, so it gets none in the pane either.
+
+/** Codex's catalog (`{ models: [{ slug, supported_reasoning_levels,
+    default_reasoning_level }] }`): each model's efforts, by its id. */
+export function catalogEffortsOf(catalog: unknown): Map<string, Pick<CodexModel, "efforts" | "defaultEffort">> {
+  const byModel = new Map<string, Pick<CodexModel, "efforts" | "defaultEffort">>();
+  const rows = (catalog as { models?: unknown } | null)?.models;
+  if (!Array.isArray(rows)) return byModel;
+  for (const row of rows as Record<string, unknown>[]) {
+    const value = normalizeModel(row?.slug);
+    if (!value || byModel.has(value)) continue;
+    byModel.set(value, { efforts: [], ...effortsOf(row.supported_reasoning_levels, row.default_reasoning_level, "effort") });
+  }
+  return byModel;
+}
+
+/** The API's models with the efforts Codex's catalog gives each: none for
+    a model it does not know. An empty catalog (no Codex to ask) says
+    nothing, and leaves the rows as they were. */
+export function withCatalogEfforts(
+  models: readonly CodexModel[],
+  catalog: Map<string, Pick<CodexModel, "efforts" | "defaultEffort">>,
+): CodexModel[] {
+  if (catalog.size === 0) return [...models];
+  return models.map((m) => ({ ...m, ...(catalog.get(m.value) ?? { efforts: [] }) }));
+}
+
+let catalogRead: Promise<Map<string, Pick<CodexModel, "efforts" | "defaultEffort">>> | null = null;
+
+/** Codex's bundled catalog, read once per process (it ships with the CLI);
+    empty when there is no Codex or it cannot say. */
+export function codexCatalog(runner: Runner = run): Promise<Map<string, Pick<CodexModel, "efforts" | "defaultEffort">>> {
+  if (runner !== run) return readCatalog(runner);
+  catalogRead ??= readCatalog(run).then((m) => {
+    if (m.size === 0) catalogRead = null;
+    return m;
+  });
+  return catalogRead;
+}
+
+async function readCatalog(runner: Runner): Promise<Map<string, Pick<CodexModel, "efforts" | "defaultEffort">>> {
+  const bin = runner === run ? which(CODEX_BIN) : CODEX_BIN;
+  if (!bin) return new Map();
+  try {
+    const result = await runner(bin, ["debug", "models", "--bundled"], { env: process.env });
+    return result.exitCode === 0 ? catalogEffortsOf(JSON.parse(result.stdout)) : new Map();
+  } catch {
+    return new Map();
+  }
 }
 
 /** How long a Codex started to list its models gets to answer. */
