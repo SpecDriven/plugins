@@ -2,6 +2,16 @@
   "plugin": "agent-claude",
   "releases": [
     {
+      "version": "1.19.3",
+      "file": "agent-claude-1.19.3.zip",
+      "sha256": "eebd062eed9b5c5ec8cb1bdee18bd2c5fb2a271c5d3d80a5db3fabf4028f980d",
+      "size": 512472,
+      "date": "2026-11-14",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "A default model the sign-in does not offer (one chosen under the API before switching to the account) is not used and leaves no stray row in the pane's menu"
+    },
+    {
       "version": "1.19.2",
       "file": "agent-claude-1.19.2.zip",
       "sha256": "5573e4788efb63a0150e406d806cd901c83e398c5f9b634a7cedf70f4c03876b",
@@ -90,16 +100,6 @@
       "api": "1",
       "minAppVersion": "0.1.196",
       "notes": "Hand agent sessions the MCP servers the app asks for"
-    },
-    {
-      "version": "1.14.0",
-      "file": "agent-claude-1.14.0.zip",
-      "sha256": "a462a781963e302e52b871484f8189fa589a986a694a686851ddb5d4be63757a",
-      "size": 509270,
-      "date": "2026-11-07",
-      "api": "1",
-      "minAppVersion": "0.1.196",
-      "notes": "The account's own models, and the sign-in finishes in the browser"
     }
   ]
 }

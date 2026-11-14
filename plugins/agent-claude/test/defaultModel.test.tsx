@@ -98,12 +98,16 @@ test("signed in with a Claude account, the default model is a dropdown of every 
       '<option value="claude-fable-5-1[1m]" title="Fable 5.1 · Most capable">Fable 5.1 — claude-fable-5-1[1m]</option>' +
       '<option value="haiku">Haiku — haiku</option>',
   );
-  // A default the menu does not hold stays on offer after it, named after
-  // the row it resolves to.
+  // A default the menu holds under its other name stays on offer after it,
+  // named after the row it resolves to.
   expect(html("claude-opus-4-8", [], ACCOUNT)).toContain(
     '<option value="haiku">Haiku — haiku</option><option value="claude-opus-4-8" selected="">Opus 4.8 — claude-opus-4-8</option>',
   );
-  expect(html("my-model", null, ACCOUNT)).toContain('<option value="my-model" selected="">my-model</option>');
+  // One the account does not offer at all — chosen under the API before the
+  // switch to the account — is not used: the menu's first is, and nothing else is offered.
+  const other = html("claude-sonnet-4-5", null, ACCOUNT);
+  expect(other).toContain('<option value="default" title="Use the default model (currently Sonnet 4.6)" selected="">');
+  expect(other).not.toContain("claude-sonnet-4-5");
   // No account list (not signed in, or Claude Code could not say): the data repo's alone.
   expect(html(null, ["opus"], [])).toContain('<option value="opus" selected="">opus</option>');
   expect(accountModelLabel({ value: "x", displayName: "x", description: "" }, ACCOUNT)).toBe("x");
@@ -133,7 +137,11 @@ test("the names Settings → Claude lists narrow the offered models, in the list
   expect(html("opus", ["haiku", "claude-opus-4-8"], ACCOUNT)).toMatch(/<option value="opus"[^>]* selected="">Opus 4.8 — opus</);
   expect(inList("claude-opus-4-8", ACCOUNT, ["opus"])).toBe(true);
   expect(inList("default", ACCOUNT, ["opus"])).toBe(false);
-  expect(inList("anything", ACCOUNT, [])).toBe(true);
+  expect(inList("anything", ACCOUNT, [])).toBe(false);
+  expect(inList("claude-opus-4-8", ACCOUNT, [])).toBe(true);
+  // Nothing offered (signed out, a proxy that lists none): nothing to hold it against.
+  expect(inList("anything", [], [])).toBe(true);
+  expect(inList("anything", [], ["opus"])).toBe(false);
   // Behind a proxy the models are the proxy's, said so.
   const proxied = html(null, null, [{ value: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", description: "Claude Sonnet 4.6" }], "the proxy");
   expect(proxied).toContain("from the models the proxy offers.");

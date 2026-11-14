@@ -33,6 +33,7 @@ import {
 import type { AccountInfoLike, QueryLike } from "../src/provider";
 import { ACCOUNT_SETTINGS } from "../src/auth";
 import { setClaudeAvailability } from "../src/cli";
+import type { AccountModel } from "../src/accountModels";
 import { AGENT_MODELS_FILE } from "../src/models";
 import { DEFAULT_SETTINGS } from "../src/settings";
 import { mountPlugin, quietProfile } from "./app";
@@ -1530,6 +1531,20 @@ test.if(appHasComposerBar)("the pane's choices are the models the sign-in offers
     settings: async () => ({ ...DEFAULT_SETTINGS, defaultModel: "default" }),
   });
   expect((await aliased.choices!({ dataRepo: null })).model).toBe("default");
+  // A default chosen under the API that the account does not offer is not
+  // used once Claude signs in with the account (nor a stray menu row); it is
+  // kept, so it comes back with the API's sign-in.
+  let signedIn: () => Promise<AccountModel[]> = offered;
+  const switched = createClaudeProvider({
+    accountModels: () => signedIn(),
+    settings: async () => ({ ...DEFAULT_SETTINGS, defaultModel: "claude-sonnet-4-5" }),
+  });
+  expect((await switched.choices!({ dataRepo: null })).model).toBeNull();
+  signedIn = async () => [{ value: "claude-sonnet-4-5", displayName: "Claude Sonnet 4.5", description: "" }];
+  expect((await switched.choices!({ dataRepo: null })).model).toBe("claude-sonnet-4-5");
+  // The id behind an offered alias is the same model, and held.
+  const byId = createClaudeProvider({ accountModels: offered, settings: async () => ({ ...DEFAULT_SETTINGS, defaultModel: "claude-opus-5-5" }) });
+  expect((await byId.choices!({ dataRepo: null })).model).toBe("claude-opus-5-5");
   // An account list that fails to come is no list.
   const failing = createClaudeProvider({ accountModels: async () => Promise.reject(new Error("down")) });
   expect((await failing.choices!({ dataRepo: null })).models.map((m) => m.value)).toEqual(["opus", "sonnet", "haiku"]);

@@ -77,8 +77,10 @@ function narrowModels(all, listed) {
   return out;
 }
 function inList(model, all, listed) {
-  if (listed.length === 0 || listed.includes(model))
+  if (listed.includes(model))
     return true;
+  if (all.length === 0)
+    return listed.length === 0;
   return narrowModels(all, listed).some((m3) => m3.value === model || m3.resolvedModel === model);
 }
 
@@ -951,5 +953,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=080B7902E8C6861C64756E2164756E21
+//# debugId=A598B55A640424AE64756E2164756E21
 //# sourceMappingURL=client.js.map
