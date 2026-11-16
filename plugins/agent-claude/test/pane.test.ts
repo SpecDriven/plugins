@@ -400,10 +400,19 @@ test("a turn goes to Claude and its reply streams into the event log", async () 
   expect(input.message.content).toBe("list the files here");
   expect((await snapshot(id)).meta.status).toBe("running");
 
-  // One turn at a time — the pane says Stop first.
+  // One turn at a time. An app from before 0.1.274 refuses a second
+  // message and says Stop first; a newer one keeps it waiting for the turn
+  // (a `queued` event), and it can be taken back before it goes.
   const again = await api(`/api/agent/chat/${id}/message`, "POST", { text: "and again" });
-  expect(again.status).toBe(409);
-  expect((await again.json()).error).toContain("Stop");
+  if (again.status === 409) {
+    expect((await again.json()).error).toContain("Stop");
+  } else {
+    expect(again.status).toBe(200);
+    const queued = ((await again.json()) as { event: ChatEvent }).event;
+    expect(queued).toMatchObject({ kind: "queued", text: "and again" });
+    const taken = await api(`/api/agent/chat/${id}/waiting/${(queued as { id: string }).id}`, "DELETE");
+    expect(taken.status).toBe(200);
+  }
 
   fake.emit(messageStart("msg_1"));
   fake.emit(delta("Here "));
