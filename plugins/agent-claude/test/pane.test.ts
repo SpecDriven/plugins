@@ -19,6 +19,7 @@ import { pluginSection } from "@specdriven/app/src/plugins/host/pluginSettings";
 import { secretStore, setSecretBackend } from "@specdriven/app/src/server/secrets";
 import { readState, writeState } from "@specdriven/app/src/server/state";
 import { categoryId, contextUsageOf, contextWindowOf, tokensInWindow } from "../src/contextUsage";
+import { isUnsupportedRequest, mcpServersOf, signInPage } from "../src/mcpServers";
 import {
   InputQueue,
   claudeBaseUrl,
@@ -116,7 +117,43 @@ class FakeQuery implements QueryLike {
     if (!fakeContext) throw new Error("Unsupported control request: get_context_usage");
     return fakeContext(opts?.detail ?? "full");
   }
+  /** What the plugin asked of the MCP servers, in order. */
+  mcpAsks: string[] = [];
+  async mcpServerStatus() {
+    return fakeMcp.servers.map((s) => ({ ...s }));
+  }
+  async toggleMcpServer(name: string, enabled: boolean) {
+    this.mcpAsks.push(`${enabled ? "enable" : "disable"} ${name}`);
+    if (fakeMcp.failWith) throw new Error(fakeMcp.failWith);
+    fakeMcp.servers.find((s) => s.name === name)!.status = enabled ? "connected" : "disabled";
+  }
+  async reconnectMcpServer(name: string) {
+    this.mcpAsks.push(`reconnect ${name}`);
+    if (fakeMcp.failWith) throw new Error(fakeMcp.failWith);
+    const server = fakeMcp.servers.find((s) => s.name === name)!;
+    server.status = "connected";
+    delete server.error;
+  }
+  async mcpAuthenticate(name: string, redirectUri?: string) {
+    this.mcpAsks.push(`authenticate ${name}${redirectUri === undefined ? "" : ` ${redirectUri}`}`);
+    // No answer set: an older Claude Code, which refuses the request.
+    if (!fakeMcp.signIn) throw new Error("Unsupported control request: mcp_authenticate");
+    return fakeMcp.signIn;
+  }
 }
+
+/** One MCP server as Claude Code reports it (the SDK's McpServerStatus). */
+interface FakeMcpServer {
+  name: string;
+  status: string;
+  scope?: string;
+  error?: string;
+  config?: { type: string };
+  tools?: { name: string }[];
+}
+
+/** The MCP side of the next FakeQuery: its servers, what a sign-in answers, and a failure to throw. */
+let fakeMcp: { servers: FakeMcpServer[]; signIn?: Record<string, unknown>; failWith?: string } = { servers: [] };
 
 /** Whether the next FakeQuery refuses the thinking request, as an older Claude Code would. */
 let fakeThinkingRefused = false;
@@ -150,6 +187,7 @@ beforeEach(async () => {
   fakes = [];
   fakeAccount = undefined;
   fakeContext = undefined;
+  fakeMcp = { servers: [] };
   fakeThinkingRefused = false;
   setClaudeAvailability(() => true);
   setQueryFactory(({ prompt, options }) => {
@@ -1808,4 +1846,113 @@ test("the pane's choices carry the sign-in a new session would start under, when
 test.if(appHasComposerBar)("the app's choices route carries the sign-in, Not logged in with no one signed in", async () => {
   const { choices } = await (await api("/api/agent/agents/claude/choices")).json();
   expect(choices.account).toMatchObject({ billing: "none", label: "Not logged in" });
+});
+
+// --- The session popover's MCP servers ---------------------------------------
+// (specs/agents/claude.feature.md "Claude lists its MCP servers, turns them on
+// and off and signs in to them"): the popover's list is Claude Code's own
+// answer, and its switch and buttons are Claude Code's own requests.
+
+/** Claude Code 2.1.326's answer, trimmed: one server of each kind the list shows. */
+const MCP_ANSWER: FakeMcpServer[] = [
+  { name: "specdriven-confluence", status: "connected", scope: "dynamic", config: { type: "stdio" }, tools: [{ name: "get_page" }, { name: "search_pages" }, { name: "list_children" }] },
+  { name: "linear", status: "needs-auth", scope: "user", config: { type: "http" } },
+  { name: "claude.ai Slack", status: "needs-auth", scope: "claudeai", config: { type: "claudeai-proxy" } },
+  { name: "figma", status: "failed", scope: "project", error: "Connection refused", config: { type: "sse" } },
+  { name: "sentry", status: "pending", scope: "local", config: { type: "http" } },
+  { name: "notes", status: "disabled", scope: "user", config: { type: "stdio" }, tools: [] },
+];
+
+test("Claude Code's MCP servers become the popover's rows with the status, where each comes from and what can be done", () => {
+  expect(mcpServersOf(MCP_ANSWER, new Set(["specdriven-confluence"]))).toEqual([
+    { name: "specdriven-confluence", status: "connected", source: "SpecDriven", tools: 3, canToggle: true, canAuthenticate: false },
+    { name: "linear", status: "needs-auth", source: "user", canToggle: true, canAuthenticate: true },
+    { name: "claude.ai Slack", status: "needs-auth", source: "claude.ai", canToggle: true, canAuthenticate: true },
+    { name: "figma", status: "failed", source: "project", error: "Connection refused", canToggle: true, canAuthenticate: false },
+    { name: "sentry", status: "connecting", source: "local", canToggle: true, canAuthenticate: false },
+    { name: "notes", status: "disabled", source: "user", canToggle: true, canAuthenticate: false },
+  ]);
+  // A server the app did not hand over keeps Claude Code's word for where it is from.
+  expect(mcpServersOf(MCP_ANSWER)[0]).toMatchObject({ source: "dynamic" });
+  // A local command that says it needs a sign-in has no browser sign-in to start.
+  expect(mcpServersOf([{ name: "local", status: "needs-auth", config: { type: "stdio" } }])[0]).toMatchObject({
+    status: "needs-auth",
+    canAuthenticate: false,
+  });
+  // A status from a newer Claude Code is shown, not dropped; a row without a name is not a server.
+  expect(mcpServersOf([{ name: "new", status: "quarantined" }, { status: "connected" }, { name: "" }])).toEqual([
+    { name: "new", status: "failed", error: 'Claude Code reports the status "quarantined"', canToggle: true, canAuthenticate: false },
+  ]);
+});
+
+test("a started sign-in gives the page to open, and none when nothing is left for the user to do", () => {
+  // Claude Code 2.1.326's answer to mcp_authenticate with no redirect address.
+  expect(
+    signInPage({ authUrl: "https://mcp.linear.app/authorize?state=s1", requiresUserAction: true, callbackExpected: true, redirectScheme: "localhost", callbackPort: 53111 } as never),
+  ).toEqual({ url: "https://mcp.linear.app/authorize?state=s1" });
+  // The stored sign-in still held: Claude Code reconnects by itself.
+  expect(signInPage({ requiresUserAction: false })).toEqual({});
+  expect(signInPage(undefined)).toEqual({});
+  // Only a web page is handed to the browser.
+  expect(signInPage({ authUrl: "file:///etc/passwd", requiresUserAction: true })).toEqual({});
+  expect(isUnsupportedRequest(new Error("Unsupported control request: mcp_authenticate"))).toBe(true);
+  expect(isUnsupportedRequest(new Error("mcp_authenticate is not supported in this context (callback not registered)"))).toBe(true);
+  expect(isUnsupportedRequest(new Error("Server not found: linear"))).toBe(false);
+});
+
+const appListsMcpServers = "chatMcpServers" in engine;
+type McpRows = { servers: { name: string; status: string; source?: string }[]; url?: string; error?: string };
+
+test.if(appListsMcpServers)("the popover's MCP list is Claude Code's, and its switch, Reconnect and Sign in are Claude Code's requests", async () => {
+  fakeMcp = {
+    servers: MCP_ANSWER.map((s) => ({ ...s })),
+    signIn: { authUrl: "https://mcp.linear.app/authorize?state=s1", requiresUserAction: true, callbackExpected: true },
+  };
+  const { id, fake } = await idleSession();
+  const mcp = `/api/agent/chat/${id}/mcp`;
+  const listed = (await (await api(mcp)).json()) as McpRows;
+  expect(listed.servers.map((s) => [s.name, s.status])).toEqual([
+    ["specdriven-confluence", "connected"],
+    ["linear", "needs-auth"],
+    ["claude.ai Slack", "needs-auth"],
+    ["figma", "failed"],
+    ["sentry", "connecting"],
+    ["notes", "disabled"],
+  ]);
+
+  const off = (await (await api(mcp, "POST", { server: "specdriven-confluence", action: "disable" })).json()) as McpRows;
+  expect(off.servers[0]!.status).toBe("disabled");
+  const on = (await (await api(mcp, "POST", { server: "notes", action: "enable" })).json()) as McpRows;
+  expect(on.servers.at(-1)!.status).toBe("connected");
+  const again = (await (await api(mcp, "POST", { server: "figma", action: "reconnect" })).json()) as McpRows;
+  expect(again.servers[3]!.status).toBe("connected");
+
+  // Sign in: no redirect address, so Claude Code waits on localhost itself; the page comes back for the app to open.
+  const signIn = (await (await api(mcp, "POST", { server: "linear", action: "authenticate" })).json()) as McpRows;
+  expect(signIn.url).toBe("https://mcp.linear.app/authorize?state=s1");
+  expect(fake.mcpAsks).toEqual(["disable specdriven-confluence", "enable notes", "reconnect figma", "authenticate linear"]);
+
+  // Claude Code's own refusal reaches the pane in its words.
+  fakeMcp.failWith = "MCP server figma is blocked by enterprise managed policy";
+  const refused = await api(mcp, "POST", { server: "figma", action: "disable" });
+  expect(refused.status).toBe(502);
+  expect(((await refused.json()) as McpRows).error).toBe(
+    'Claude could not disable "figma": MCP server figma is blocked by enterprise managed policy',
+  );
+});
+
+test.if(appListsMcpServers)("a Claude Code that cannot start an MCP sign-in says how to sign in instead", async () => {
+  fakeMcp = { servers: [{ name: "linear", status: "needs-auth", scope: "user", config: { type: "http" } }] };
+  const { id, fake } = await idleSession();
+  const res = await api(`/api/agent/chat/${id}/mcp`, "POST", { server: "linear", action: "authenticate" });
+  expect(res.status).toBe(409);
+  expect(((await res.json()) as McpRows).error).toBe(
+    'This Claude Code cannot start an MCP sign-in from here; run `claude` in a terminal and sign in to "linear" with /mcp',
+  );
+  expect(fake.mcpAsks).toEqual(["authenticate linear"]);
+});
+
+test.if(appListsMcpServers)("the Claude agent says it lists its MCP servers", async () => {
+  const state = (await (await api("/api/state")).json()) as { agents: { id: string; capabilities: { mcpServers?: boolean } }[] };
+  expect(state.agents.find((a) => a.id === "claude")!.capabilities.mcpServers).toBe(true);
 });

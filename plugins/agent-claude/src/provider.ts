@@ -42,7 +42,9 @@ import type {
   AgentMcpServer,
   AgentModelOption,
   ChatContextUsage,
+  ChatMcpServer,
   ContextDetail,
+  McpSignIn,
   PaneBlock,
   PaneHost,
   PaneOutput,
@@ -51,6 +53,7 @@ import type {
   PastedImage,
 } from "./paneContract";
 import { contextUsageOf, contextWindowOf, tokensInWindow, type ContextUsageAnswer } from "./contextUsage";
+import { isUnsupportedRequest, mcpServersOf, signInPage, type McpAuthAnswer, type McpStatusAnswer } from "./mcpServers";
 import { CLAUDE_MODEL_ALIASES, DEFAULT_SETTINGS, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 // --- The account chip -------------------------------------------------------
@@ -249,6 +252,18 @@ export interface QueryLike extends AsyncIterable<SDKMessage> {
   applyFlagSettings?(settings: { effortLevel?: ClaudeEffort | null }): Promise<void>;
   /** Claude Code's /context count (src/contextUsage.ts); older binaries refuse it. */
   getContextUsage?(opts?: { detail?: ContextDetail }): Promise<unknown>;
+  /** How every MCP server of the session stands (src/mcpServers.ts). */
+  mcpServerStatus?(): Promise<unknown[]>;
+  /** Turn an MCP server on or off; throws when Claude Code cannot. */
+  toggleMcpServer?(serverName: string, enabled: boolean): Promise<void>;
+  /** Connect an MCP server again; throws when it still fails. */
+  reconnectMcpServer?(serverName: string): Promise<void>;
+  /** Start an MCP server's browser sign-in. On the SDK's Query object and
+      in Claude Code (the `mcp_authenticate` control request), but not in the
+      SDK's published types — so it is asked for as optional, and a Claude
+      Code without it is told apart by its refusal. With no redirect address
+      Claude Code listens on localhost for the browser's return by itself. */
+  mcpAuthenticate?(serverName: string, redirectUri?: string): Promise<unknown>;
   /** The thinking budget and how thinking is reported (askForThinking, below). */
   setMaxThinkingTokens?(
     maxThinkingTokens: number | null,
@@ -578,6 +593,9 @@ class ClaudeSession implements AgentSession {
   /** Whether this Claude Code answers the context count: asked once, and
       a refusal then means the totals from each turn stand in for it. */
   private contextProbe: "unknown" | "yes" | "no" = "unknown";
+  /** The MCP servers the app handed the session, by name: the popover's
+      list says they are SpecDriven's (src/mcpServers.ts). */
+  appMcpServers: ReadonlySet<string> = new Set();
   /** The newest count asked for; an older answer arriving later is dropped. */
   private contextTicket = 0;
   /** What the last request put in the window, and the model's window, from
@@ -703,6 +721,53 @@ class ClaudeSession implements AgentSession {
       }
     }
     return this.totalsFromTurns();
+  }
+
+  // --- MCP servers (specs/agents/claude.feature.md "Claude lists its MCP
+  // servers, turns them on and off and signs in to them") --------------------
+
+  /** The Claude Code run to ask about MCP servers; a refusal while there is none. */
+  private mcpQuery(): QueryLike {
+    if (!this.query) throw new AgentError(409, "Claude is starting again; try in a moment");
+    return this.query;
+  }
+
+  /** The session's MCP servers as Claude Code has them now. */
+  async mcpServers(): Promise<ChatMcpServer[]> {
+    const query = this.mcpQuery();
+    if (!query.mcpServerStatus) throw new AgentError(409, "This Claude Code does not list its MCP servers");
+    return mcpServersOf((await query.mcpServerStatus()) as McpStatusAnswer[], this.appMcpServers);
+  }
+
+  async setMcpServerEnabled(name: string, enabled: boolean): Promise<void> {
+    const query = this.mcpQuery();
+    if (!query.toggleMcpServer) throw new AgentError(409, "This Claude Code cannot turn MCP servers on or off");
+    await query.toggleMcpServer(name, enabled);
+  }
+
+  async reconnectMcpServer(name: string): Promise<void> {
+    const query = this.mcpQuery();
+    if (!query.reconnectMcpServer) throw new AgentError(409, "This Claude Code cannot reconnect MCP servers");
+    await query.reconnectMcpServer(name);
+  }
+
+  /**
+   * Start a server's sign-in: Claude Code answers with the page to sign in
+   * on and waits on localhost for the browser to come back, then connects
+   * the server by itself — the popover's list shows it. A Claude Code that
+   * does not know the request says so in words that name the way round it.
+   */
+  async authenticateMcpServer(name: string): Promise<McpSignIn> {
+    const query = this.mcpQuery();
+    const unsupported = () =>
+      new AgentError(409, `This Claude Code cannot start an MCP sign-in from here; run \`claude\` in a terminal and sign in to "${name}" with /mcp`);
+    if (!query.mcpAuthenticate) throw unsupported();
+    try {
+      return signInPage((await query.mcpAuthenticate(name)) as McpAuthAnswer);
+    } catch (e) {
+      if (isUnsupportedRequest(e)) throw unsupported();
+      throw e;
+    }
   }
 
   /** The count from the turns alone: what the last request carried, of the model's window. */
@@ -1120,6 +1185,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
       images: true,
       contextUsage: "breakdown",
       thinking: true,
+      mcpServers: true,
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -1127,6 +1193,7 @@ export function createClaudeProvider(options: ClaudeProviderOptions = {}): PaneP
     },
     async start(opts: PaneStartOptions): Promise<AgentSession> {
       const session = new ClaudeSession(opts.host);
+      session.appMcpServers = new Set((opts.mcpServers ?? []).map((s) => s.name));
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
       session.launch = async ({ input, abort, permissionMode, resume, model, effort }) => {
         // The sign-in Settings chose (src/auth.ts), read afresh for every

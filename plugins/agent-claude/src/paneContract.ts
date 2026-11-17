@@ -69,6 +69,8 @@ export type PaneCapabilities = AgentProvider["capabilities"] & {
   contextUsage?: "breakdown" | "totals";
   /** Whether the agent reports its thinking (the transcript views, below). */
   thinking?: boolean;
+  /** Whether a session lists its MCP servers and acts on them (below). */
+  mcpServers?: boolean;
 };
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
@@ -139,3 +141,32 @@ export type PaneOutput =
   | { kind: "text_delta"; messageId: string; index: number; text: string; parentToolUseId?: string | null }
   | { kind: "thinking_delta"; messageId: string; index: number; text: string; parentToolUseId?: string | null }
   | { kind: "assistant"; messageId: string; turn: number; blocks: PaneBlock[]; parentToolUseId: string | null };
+
+// --- The session popover's MCP servers (SpecDriven after 0.1.286) ----------
+//
+// The popover lists a session's MCP servers and acts on them: the app asks
+// `AgentSession.mcpServers` for the list and `setMcpServerEnabled`,
+// `reconnectMcpServer` and `authenticateMcpServer` for its switch and its
+// buttons, when `capabilities.mcpServers` says they are there. An older app
+// knows none of it and never asks.
+
+export type McpServerStatus = "connected" | "connecting" | "needs-auth" | "failed" | "disabled";
+
+export interface ChatMcpServer {
+  /** The server's name as the agent lists it; what the actions take. */
+  name: string;
+  status: McpServerStatus;
+  /** Where it is configured: "project", "user", "local", "claude.ai", "SpecDriven". */
+  source?: string;
+  /** Why it failed. */
+  error?: string;
+  /** How many tools it gives, once connected. */
+  tools?: number;
+  canToggle: boolean;
+  canAuthenticate: boolean;
+}
+
+/** A sign-in the agent started: the page the app opens in the browser. */
+export interface McpSignIn {
+  url?: string;
+}
