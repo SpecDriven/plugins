@@ -2,6 +2,16 @@
   "plugin": "agent-claude",
   "releases": [
     {
+      "version": "1.20.0",
+      "file": "agent-claude-1.20.0.zip",
+      "sha256": "71f96f68e52056b9f3fd18ee67b2151e5e2e8fcae43bfe9a22825423afd7c24d",
+      "size": 513340,
+      "date": "2026-11-17",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "The session popover lists Claude's MCP servers, turns them on and off and signs in to them"
+    },
+    {
       "version": "1.19.3",
       "file": "agent-claude-1.19.3.zip",
       "sha256": "eebd062eed9b5c5ec8cb1bdee18bd2c5fb2a271c5d3d80a5db3fabf4028f980d",
@@ -90,16 +100,6 @@
       "api": "1",
       "minAppVersion": "0.1.196",
       "notes": "Report the context window to the pane's session popover"
-    },
-    {
-      "version": "1.15.0",
-      "file": "agent-claude-1.15.0.zip",
-      "sha256": "6625d6b375c86afd39badfb961faf7185c74b7ba3a8f7699c9f5ee20c5511eb0",
-      "size": 509362,
-      "date": "2026-11-07",
-      "api": "1",
-      "minAppVersion": "0.1.196",
-      "notes": "Hand agent sessions the MCP servers the app asks for"
     }
   ]
 }

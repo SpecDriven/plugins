@@ -45304,6 +45304,50 @@ function contextWindowOf(modelUsage, model) {
   return sizes.length ? Math.max(...sizes) : null;
 }
 
+// plugins/agent-claude/src/mcpServers.ts
+var STATUS = {
+  connected: "connected",
+  failed: "failed",
+  "needs-auth": "needs-auth",
+  pending: "connecting",
+  disabled: "disabled"
+};
+var SOURCE = { claudeai: "claude.ai" };
+var NO_SIGN_IN = new Set(["stdio", "sdk"]);
+function mcpServersOf(answer, fromApp = new Set) {
+  const servers = [];
+  for (const raw of answer) {
+    if (!raw || typeof raw.name !== "string" || !raw.name)
+      continue;
+    const said = typeof raw.status === "string" ? raw.status : "";
+    const status = STATUS[said] ?? "failed";
+    const scope = typeof raw.scope === "string" && raw.scope ? raw.scope : undefined;
+    const source = fromApp.has(raw.name) ? "SpecDriven" : scope ? SOURCE[scope] ?? scope : undefined;
+    const error = status !== "failed" ? undefined : typeof raw.error === "string" && raw.error ? raw.error : STATUS[said] ? undefined : `Claude Code reports the status "${said}"`;
+    const transport = typeof raw.config?.type === "string" ? raw.config.type : undefined;
+    servers.push({
+      name: raw.name,
+      status,
+      ...source ? { source } : {},
+      ...error ? { error } : {},
+      ...status === "connected" && Array.isArray(raw.tools) ? { tools: raw.tools.length } : {},
+      canToggle: true,
+      canAuthenticate: status === "needs-auth" && !(transport !== undefined && NO_SIGN_IN.has(transport))
+    });
+  }
+  return servers;
+}
+function signInPage(answer) {
+  if (!answer || answer.requiresUserAction === false)
+    return {};
+  const url = typeof answer.authUrl === "string" ? answer.authUrl : "";
+  return /^https?:\/\//i.test(url) ? { url } : {};
+}
+function isUnsupportedRequest(error) {
+  const text = error instanceof Error ? error.message : String(error);
+  return /unsupported control request|is not supported in this context/i.test(text);
+}
+
 // plugins/agent-claude/src/provider.ts
 var PROVIDER_LABEL = {
   bedrock: "Amazon Bedrock",
@@ -45619,6 +45663,7 @@ class ClaudeSession {
   resends = 0;
   retry = null;
   contextProbe = "unknown";
+  appMcpServers = new Set;
   contextTicket = 0;
   lastWindowTokens = null;
   contextWindow = null;
@@ -45720,6 +45765,42 @@ class ClaudeSession {
       }
     }
     return this.totalsFromTurns();
+  }
+  mcpQuery() {
+    if (!this.query)
+      throw new AgentError(409, "Claude is starting again; try in a moment");
+    return this.query;
+  }
+  async mcpServers() {
+    const query = this.mcpQuery();
+    if (!query.mcpServerStatus)
+      throw new AgentError(409, "This Claude Code does not list its MCP servers");
+    return mcpServersOf(await query.mcpServerStatus(), this.appMcpServers);
+  }
+  async setMcpServerEnabled(name, enabled) {
+    const query = this.mcpQuery();
+    if (!query.toggleMcpServer)
+      throw new AgentError(409, "This Claude Code cannot turn MCP servers on or off");
+    await query.toggleMcpServer(name, enabled);
+  }
+  async reconnectMcpServer(name) {
+    const query = this.mcpQuery();
+    if (!query.reconnectMcpServer)
+      throw new AgentError(409, "This Claude Code cannot reconnect MCP servers");
+    await query.reconnectMcpServer(name);
+  }
+  async authenticateMcpServer(name) {
+    const query = this.mcpQuery();
+    const unsupported = () => new AgentError(409, `This Claude Code cannot start an MCP sign-in from here; run \`claude\` in a terminal and sign in to "${name}" with /mcp`);
+    if (!query.mcpAuthenticate)
+      throw unsupported();
+    try {
+      return signInPage(await query.mcpAuthenticate(name));
+    } catch (e) {
+      if (isUnsupportedRequest(e))
+        throw unsupported();
+      throw e;
+    }
   }
   totalsFromTurns() {
     if (this.lastWindowTokens === null)
@@ -46031,7 +46112,8 @@ function createClaudeProvider(options = {}) {
       effort: true,
       images: true,
       contextUsage: "breakdown",
-      thinking: true
+      thinking: true,
+      mcpServers: true
     },
     defaultPermissionMode: "auto",
     loginHint: {
@@ -46039,6 +46121,7 @@ function createClaudeProvider(options = {}) {
     },
     async start(opts) {
       const session = new ClaudeSession(opts.host);
+      session.appMcpServers = new Set((opts.mcpServers ?? []).map((s) => s.name));
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
       session.launch = async ({ input, abort, permissionMode, resume, model, effort }) => {
         const own = await settings();
@@ -46644,5 +46727,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=CEB6EF8944F0759164756E2164756E21
+//# debugId=7CA98E89123086D964756E2164756E21
 //# sourceMappingURL=host.js.map
