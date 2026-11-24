@@ -71,6 +71,9 @@ export type PaneCapabilities = AgentProvider["capabilities"] & {
   thinking?: boolean;
   /** Whether a session lists its MCP servers and acts on them (below). */
   mcpServers?: boolean;
+  /** Whether the agent manages its MCP servers before a session, and
+      where it can add one (below). */
+  mcpManage?: McpManageCapability;
 };
 
 export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
@@ -78,6 +81,8 @@ export type PaneProvider = Omit<AgentProvider, "capabilities" | "start"> & {
   start(opts: PaneStartOptions): ReturnType<AgentProvider["start"]>;
   choices(ctx: { dataRepo: string | null }): Promise<AgentChoices>;
   setDefaults(patch: AgentDefaultsPatch): Promise<void>;
+  /** The MCP servers before a session (below); set by withMcpAdmin. */
+  mcp?: AgentMcpAdmin;
 };
 
 // --- The session popover's context meter (SpecDriven 0.1.243 and later) ----
@@ -169,4 +174,84 @@ export interface ChatMcpServer {
 /** A sign-in the agent started: the page the app opens in the browser. */
 export interface McpSignIn {
   url?: string;
+}
+
+// --- MCP servers before a session (SpecDriven after 0.1.300) ----------------
+//
+// The pane's "MCP servers…" dialog asks the agent itself, with no session
+// running, for the servers a session started in a folder would get: the app
+// calls `AgentProvider.mcp` when `capabilities.mcpManage` says it is there —
+// list, act (the popover's four actions), add and remove, and release once
+// the dialog is shut. An older app knows none of it and never asks.
+
+export type McpServerAction = "enable" | "disable" | "reconnect" | "authenticate";
+
+/** Where a server is kept: for this folder only, for every folder of the
+    user, or in the file the repo shares (.mcp.json). */
+export type McpScope = "local" | "user" | "project";
+
+export type McpTransport = "stdio" | "http" | "sse";
+
+export interface McpManageCapability {
+  scopes: readonly McpScope[];
+  transports: readonly McpTransport[];
+}
+
+/** One tool of a server: its own name, and what its definition takes of
+    the context window — from a session's start, or only once loaded. */
+export interface McpToolInfo {
+  name: string;
+  description?: string;
+  tokens?: number;
+  loaded?: boolean;
+}
+
+/** A server as the dialog shows it. Never a secret: the environment and
+    the headers are given by name only. */
+export interface McpServerDetail extends ChatMcpServer {
+  /** Where it is kept, when that is a place it can be deleted from. */
+  scope?: McpScope;
+  transport?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  envNames?: string[];
+  headerNames?: string[];
+  serverName?: string;
+  version?: string;
+  toolList?: McpToolInfo[];
+  context?: { loaded: number; deferred: number };
+  canDelete: boolean;
+}
+
+/** A server the dialog's form asks to add; the app has checked it. */
+export interface McpServerDraft {
+  name: string;
+  scope: McpScope;
+  transport: McpTransport;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+export interface AgentMcpList {
+  servers: McpServerDetail[];
+  contextWindow?: number;
+}
+
+/** The folder the dialog is about, and the servers the app would hand a session there. */
+export interface AgentMcpContext {
+  cwd: string;
+  dataRepo: string | null;
+  mcpServers?: AgentMcpServer[];
+}
+
+export interface AgentMcpAdmin {
+  list(ctx: AgentMcpContext): Promise<AgentMcpList>;
+  act(ctx: AgentMcpContext, name: string, action: McpServerAction): Promise<McpSignIn | void>;
+  add(ctx: AgentMcpContext, draft: McpServerDraft): Promise<void>;
+  remove(ctx: AgentMcpContext, name: string, scope: McpScope): Promise<void>;
+  release?(ctx: AgentMcpContext): void | Promise<void>;
 }

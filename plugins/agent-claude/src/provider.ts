@@ -53,7 +53,7 @@ import type {
   PastedImage,
 } from "./paneContract";
 import { contextUsageOf, contextWindowOf, tokensInWindow, type ContextUsageAnswer } from "./contextUsage";
-import { isUnsupportedRequest, mcpServersOf, signInPage, type McpAuthAnswer, type McpStatusAnswer } from "./mcpServers";
+import { authenticateMcp, mcpServersOf, mcpStatus, reconnectMcp, setMcpEnabled } from "./mcpServers";
 import { CLAUDE_MODEL_ALIASES, DEFAULT_SETTINGS, type ClaudeEffort, type ClaudeSettingsValues } from "./settings";
 
 // --- The account chip -------------------------------------------------------
@@ -734,40 +734,21 @@ class ClaudeSession implements AgentSession {
 
   /** The session's MCP servers as Claude Code has them now. */
   async mcpServers(): Promise<ChatMcpServer[]> {
-    const query = this.mcpQuery();
-    if (!query.mcpServerStatus) throw new AgentError(409, "This Claude Code does not list its MCP servers");
-    return mcpServersOf((await query.mcpServerStatus()) as McpStatusAnswer[], this.appMcpServers);
+    return mcpServersOf(await mcpStatus(this.mcpQuery()), this.appMcpServers);
   }
 
   async setMcpServerEnabled(name: string, enabled: boolean): Promise<void> {
-    const query = this.mcpQuery();
-    if (!query.toggleMcpServer) throw new AgentError(409, "This Claude Code cannot turn MCP servers on or off");
-    await query.toggleMcpServer(name, enabled);
+    await setMcpEnabled(this.mcpQuery(), name, enabled);
   }
 
   async reconnectMcpServer(name: string): Promise<void> {
-    const query = this.mcpQuery();
-    if (!query.reconnectMcpServer) throw new AgentError(409, "This Claude Code cannot reconnect MCP servers");
-    await query.reconnectMcpServer(name);
+    await reconnectMcp(this.mcpQuery(), name);
   }
 
-  /**
-   * Start a server's sign-in: Claude Code answers with the page to sign in
-   * on and waits on localhost for the browser to come back, then connects
-   * the server by itself — the popover's list shows it. A Claude Code that
-   * does not know the request says so in words that name the way round it.
-   */
-  async authenticateMcpServer(name: string): Promise<McpSignIn> {
-    const query = this.mcpQuery();
-    const unsupported = () =>
-      new AgentError(409, `This Claude Code cannot start an MCP sign-in from here; run \`claude\` in a terminal and sign in to "${name}" with /mcp`);
-    if (!query.mcpAuthenticate) throw unsupported();
-    try {
-      return signInPage((await query.mcpAuthenticate(name)) as McpAuthAnswer);
-    } catch (e) {
-      if (isUnsupportedRequest(e)) throw unsupported();
-      throw e;
-    }
+  /** Start a server's sign-in (src/mcpServers.ts authenticateMcp); the
+      popover's list shows the server once the browser is through. */
+  authenticateMcpServer(name: string): Promise<McpSignIn> {
+    return authenticateMcp(this.mcpQuery(), name);
   }
 
   /** The count from the turns alone: what the last request carried, of the model's window. */

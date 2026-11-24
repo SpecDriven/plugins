@@ -2,6 +2,16 @@
   "plugin": "agent-claude",
   "releases": [
     {
+      "version": "1.22.0",
+      "file": "agent-claude-1.22.0.zip",
+      "sha256": "d29fa685eb21c9cec75bb28b5467435e3a1e34d40222721a25f7115c2228a27d",
+      "size": 520158,
+      "date": "2026-11-24",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "MCP servers before a session: the pane's MCP servers… dialog lists Claude's servers for a folder, turns them on and off, signs in to them, adds and deletes them, and says what their tools take of the context window"
+    },
+    {
       "version": "1.21.0",
       "file": "agent-claude-1.21.0.zip",
       "sha256": "c13cba11e36f821825453c2e7494457beacd63a5b8b4bad500ab3bd384cc1ae2",
@@ -90,16 +100,6 @@
       "api": "1",
       "minAppVersion": "0.1.196",
       "notes": "The pane's choices carry the sign-in, so the header chip shows with no session"
-    },
-    {
-      "version": "1.16.1",
-      "file": "agent-claude-1.16.1.zip",
-      "sha256": "3950d230f6eb4287e99f47d887401812ee640f8e7ec595ad0557e4f7a8bed64d",
-      "size": 511007,
-      "date": "2026-11-09",
-      "api": "1",
-      "minAppVersion": "0.1.196",
-      "notes": "Settings calls the second sign-in \"API\", not \"API proxy\""
     }
   ]
 }
