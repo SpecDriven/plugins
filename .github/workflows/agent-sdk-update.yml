@@ -1,0 +1,198 @@
+name: Agent SDK update
+
+# Keeps agent-claude on the newest Claude Agent SDK
+# (https://github.com/anthropics/claude-agent-sdk-typescript/releases).
+# Every day, and on demand, it compares the SDK version agent-claude pins
+# with the newest SDK release. When a newer one is out it opens a pull
+# request (or updates the open one on the same branch) that releases a new
+# patch version of agent-claude:
+#
+#   - package.json and bun.lock pin the new SDK
+#   - src/binaries.json pins its Claude Code binaries and the Claude Code
+#     release it is at parity with (scripts/pin-binaries.ts)
+#   - the SDK, the pins and the release notes' "Updated to parity with
+#     Claude Code v…" agree (scripts/check-sdk-parity.ts)
+#   - the type check and the tests pass
+#   - dist/, the release zip and marketplace.json come from
+#     scripts/release.ts, run against the newest app release, the app CI
+#     checks the release row against
+#
+# The PR's body lists the release notes of every SDK release it takes in.
+#
+# The pull request is pushed and opened with the SDK_UPDATE_TOKEN secret: a
+# fine-grained personal access token (this repository only; Contents and
+# Pull requests: read and write) or a GitHub App token. That token's PRs
+# start CI, and it needs no Actions setting. Without the secret the
+# workflow falls back to its own GITHUB_TOKEN, which works only where
+# "Allow GitHub Actions to create and approve pull requests" is on (for a
+# repository in an organization the organization may hold that setting:
+# Organization settings → Actions → General), and whose PRs do not start CI
+# until someone pushes to them or closes and reopens them.
+
+on:
+  schedule:
+    - cron: "43 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: agent-sdk-update
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: 1.3.14
+  PLUGIN: plugins/agent-claude
+  SDK: "@anthropic-ai/claude-agent-sdk"
+  SDK_REPO: anthropics/claude-agent-sdk-typescript
+  BRANCH: automation/claude-agent-sdk
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: plugins
+          token: ${{ secrets.SDK_UPDATE_TOKEN || github.token }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Is a newer SDK out?
+        id: sdk
+        working-directory: plugins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh release view --repo "$SDK_REPO" --json tagName --jq .tagName | sed 's/^v//')
+          current=$(jq -r --arg p "$SDK" '.dependencies[$p]' "$PLUGIN/package.json")
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          newest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)
+          if [ "$latest" = "$current" ] || [ "$newest" != "$latest" ]; then
+            echo "agent-claude is on $current, the newest SDK release is $latest: nothing to do"
+            echo "update=false" >> "$GITHUB_OUTPUT"
+          elif ! npm view "$SDK@$latest" version > /dev/null 2>&1; then
+            echo "$SDK $latest is released on GitHub but not on npm yet: next run"
+            echo "update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent-claude is on $current, updating to $latest"
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The app the release is built with: its newest release, as CI's
+      # "release" row checks it (scripts/ci-matrix.ts).
+      - name: Newest app release
+        if: steps.sdk.outputs.update == 'true'
+        id: app
+        working-directory: plugins
+        run: bun scripts/ci-matrix.ts > /dev/null
+      - uses: actions/checkout@v5
+        if: steps.sdk.outputs.update == 'true'
+        with:
+          repository: SpecDriven/specdriven-app
+          ref: ${{ steps.app.outputs.release }}
+          path: specdriven-app
+      - name: Install the app (${{ steps.app.outputs.release }})
+        if: steps.sdk.outputs.update == 'true'
+        working-directory: specdriven-app
+        run: bun install --ignore-scripts
+
+      - name: Update the SDK and pin its binaries
+        if: steps.sdk.outputs.update == 'true'
+        working-directory: plugins/${{ env.PLUGIN }}
+        env:
+          LATEST: ${{ steps.sdk.outputs.latest }}
+        run: |
+          bun install --frozen-lockfile
+          bun add --exact "$SDK@$LATEST"
+          bun scripts/pin-binaries.ts
+
+      - name: SDK and Claude Code versions agree
+        if: steps.sdk.outputs.update == 'true'
+        id: parity
+        working-directory: plugins/${{ env.PLUGIN }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT: ${{ steps.sdk.outputs.current }}
+        run: bun scripts/check-sdk-parity.ts --notes-since "$CURRENT" --notes-file "$RUNNER_TEMP/sdk-notes.md"
+
+      - name: Type check
+        if: steps.sdk.outputs.update == 'true'
+        working-directory: plugins/${{ env.PLUGIN }}
+        run: bunx tsc --noEmit -p .
+      - name: Test
+        if: steps.sdk.outputs.update == 'true'
+        working-directory: plugins/${{ env.PLUGIN }}
+        run: bun test --timeout 20000
+
+      # A patch version of its own: a released version is never written again.
+      - name: Raise agent-claude's version
+        if: steps.sdk.outputs.update == 'true'
+        id: version
+        working-directory: plugins/${{ env.PLUGIN }}
+        run: |
+          version=$(bun -e '
+            const pkg = await Bun.file("package.json").json();
+            const [major, minor, patch] = pkg.version.split(".").map(Number);
+            pkg.version = `${major}.${minor}.${patch + 1}`;
+            await Bun.write("package.json", JSON.stringify(pkg, null, 2) + "\n");
+            console.log(pkg.version);
+          ')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Built from the repository root, as by hand, so dist/'s module path
+      # comments match the zip's. Nothing rebuilds dist/ after this: CI's
+      # check-dist runs on the pull request.
+      - name: Release agent-claude
+        if: steps.sdk.outputs.update == 'true'
+        working-directory: plugins
+        env:
+          LATEST: ${{ steps.sdk.outputs.latest }}
+          CLAUDE_CODE: ${{ steps.parity.outputs.claude_code }}
+        run: |
+          bun scripts/release.ts "$PLUGIN" --notes "Agent SDK $LATEST (Claude Code $CLAUDE_CODE)"
+          git add -A
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          bun scripts/check-index.ts
+          bun scripts/check-release.ts "$PLUGIN"
+
+      - name: Pull request body
+        if: steps.sdk.outputs.update == 'true'
+        env:
+          CURRENT: ${{ steps.sdk.outputs.current }}
+          LATEST: ${{ steps.sdk.outputs.latest }}
+          CLAUDE_CODE: ${{ steps.parity.outputs.claude_code }}
+          VERSION: ${{ steps.version.outputs.version }}
+          APP: ${{ steps.app.outputs.release }}
+        run: |
+          {
+            echo "Updates \`$SDK\` from $CURRENT to **$LATEST**, at parity with **Claude Code $CLAUDE_CODE**, and releases agent-claude $VERSION."
+            echo
+            echo "- \`src/binaries.json\` pins the SDK's Claude Code binaries and Claude Code $CLAUDE_CODE"
+            echo "- The SDK, the pins and the release notes agree on the Claude Code version (\`scripts/check-sdk-parity.ts\`)"
+            echo "- The type check and the tests passed; \`dist/\` and the release zip were built against SpecDriven $APP"
+            echo "- Settings → Claude asks users whose \`claude\` is older than $CLAUDE_CODE to update it"
+            echo
+            echo "Opened by \`.github/workflows/agent-sdk-update.yml\`. A newer SDK release updates this PR in place."
+            echo
+            echo "## SDK release notes"
+            echo
+            cat "$RUNNER_TEMP/sdk-notes.md"
+          } > "$RUNNER_TEMP/pr-body.md"
+
+      - name: Open or update the pull request
+        if: steps.sdk.outputs.update == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          path: plugins
+          token: ${{ secrets.SDK_UPDATE_TOKEN || github.token }}
+          branch: ${{ env.BRANCH }}
+          base: main
+          delete-branch: true
+          commit-message: "agent-claude ${{ steps.version.outputs.version }}: Agent SDK ${{ steps.sdk.outputs.latest }} (Claude Code ${{ steps.parity.outputs.claude_code }})"
+          title: "agent-claude ${{ steps.version.outputs.version }}: Agent SDK ${{ steps.sdk.outputs.latest }} (Claude Code ${{ steps.parity.outputs.claude_code }})"
+          body-path: ${{ runner.temp }}/pr-body.md

@@ -29,6 +29,19 @@ export interface ClaudeSignIn {
   error: string | null;
 }
 
+export interface ClaudeCodeVersionInfo {
+  version: string | null;
+  sdkVersion: string;
+  status: "match" | "older" | "newer" | "missing" | "unknown";
+  source: "path" | "fetched" | null;
+}
+
+/** What Settings → Claude says of the local Claude Code's version; null when there is nothing to say. */
+export function claudeCodeVersionAdvice(v: ClaudeCodeVersionInfo | undefined): string | null {
+  if (!v || v.status !== "older" || !v.version) return null;
+  return `Claude Code ${v.version} is older than ${v.sdkVersion}, the release this plugin is built for, so some features may not work. Update it: run claude update in a terminal, then reopen this page.`;
+}
+
 export interface ClaudeAuthInfo {
   mode: ClaudeAuthMode;
   /** No stored choice: the server inferred this one. */
@@ -36,6 +49,9 @@ export interface ClaudeAuthInfo {
   cliAvailable: boolean;
   /** No Claude Code yet, but the email sign-in fetches one. */
   canFetchClaude: boolean;
+  /** The local Claude Code's version against the release the bundled Agent
+      SDK is built for. Absent from a plugin host before it. */
+  claudeCode?: ClaudeCodeVersionInfo;
   login: { loggedIn: boolean; method: string; email: string | null };
   proxy: {
     url: string | null;
@@ -182,6 +198,11 @@ export function ClaudeSettings({ models = null }: { models?: string[] | null } =
           <option value="proxy">API</option>
         </select>
       </label>
+      {claudeCodeVersionAdvice(info.claudeCode) && (
+        <p className="error" role="status">
+          {claudeCodeVersionAdvice(info.claudeCode)}
+        </p>
+      )}
       {info.mode === "login" ? (
         <ClaudeAccount info={info} onChange={setInfo} refresh={refresh} reloadModels={reloadModels} onModels={setAccount} />
       ) : (

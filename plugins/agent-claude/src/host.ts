@@ -30,6 +30,8 @@ import type { AccountModel, AccountProbe } from "./accountModels";
 import { fetchProxyModels } from "./proxyModels";
 import { canFetchBinary } from "./binary";
 import { claudeAvailable } from "./cli";
+import { claudeCodeVersion, forgetClaudeVersion } from "./claudeVersion";
+import type { ClaudeCodeVersion } from "./claudeVersion";
 import { listedClaudeModels, withReportedModels } from "./models";
 import { createClaudeProvider, describeSignIn } from "./provider";
 import { withReconnect } from "./reconnect";
@@ -59,13 +61,15 @@ function tilde(path: string | null): string | null {
   return path && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 
-function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus, own: ClaudeSettingsValues) {
+function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus, own: ClaudeSettingsValues, claudeCode: ClaudeCodeVersion) {
   return {
     mode: auth.mode,
     inferred: auth.inferred,
     cliAvailable: claudeAvailable(),
     /** No Claude Code yet, but the email sign-in can fetch this platform's. */
     canFetchClaude: canFetchBinary(),
+    /** The local Claude Code's version against the one the SDK is built for. */
+    claudeCode,
     login,
     proxy: {
       /** The url in effect: the stored one, else the detected one. */
@@ -148,10 +152,22 @@ const plugin: Plugin<Context, HostConfig> = {
     let signInAt = -Infinity;
     const signInChanged = () => {
       forgetAccountModels();
+      forgetClaudeVersion();
       signInAt = -Infinity;
       (agents as { changed?(id: string): void }).changed?.("claude");
     };
     ctx.effect(() => onSignInChange(signInChanged));
+
+    // Activated: is the local Claude Code as new as the one the bundled SDK
+    // drives (src/claudeVersion.ts)? Settings → Claude says so too; this is
+    // for the log. Not awaited — activation never waits on a subprocess.
+    if (!isHostedMode() && !isDemoMode()) {
+      void claudeCodeVersion().then((v) => {
+        const attrs = { version: v.version ?? "none", sdkVersion: v.sdkVersion, status: v.status, source: v.source ?? "none" };
+        if (v.status === "older") log.warn("Claude Code is older than the Agent SDK expects", attrs);
+        else log.info("Claude Code version", attrs);
+      });
+    }
 
     // The values that lived at the top of settings.json while Claude was
     // built in come into the plugin's section once.
@@ -219,7 +235,8 @@ const plugin: Plugin<Context, HostConfig> = {
     const answer = async (): Promise<Response> => {
       const own = await settings();
       const auth = await effectiveClaudeAuth(own, await claudeCwd(), await storedToken(secrets));
-      return json(claudeAuthView(auth, await loginStatus(), own));
+      const [login, claudeCode] = await Promise.all([loginStatus(), claudeCodeVersion()]);
+      return json(claudeAuthView(auth, login, own, claudeCode));
     };
 
     const getAuth: Handler = () => answer();

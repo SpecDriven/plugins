@@ -99,6 +99,11 @@ var jsx = m3.jsx;
 var jsxs = m3.jsxs;
 
 // plugins/agent-claude/src/ui/ClaudeSettings.tsx
+function claudeCodeVersionAdvice(v) {
+  if (!v || v.status !== "older" || !v.version)
+    return null;
+  return `Claude Code ${v.version} is older than ${v.sdkVersion}, the release this plugin is built for, so some features may not work. Update it: run claude update in a terminal, then reopen this page.`;
+}
 async function patchClaudeSettings(patch) {
   const result = await call("PUT", "/api/claude/settings", patch);
   return result.ok ? null : result.error;
@@ -222,6 +227,11 @@ function ClaudeSettings({ models = null } = {}) {
             ]
           })
         ]
+      }),
+      claudeCodeVersionAdvice(info.claudeCode) && /* @__PURE__ */ jsx("p", {
+        className: "error",
+        role: "status",
+        children: claudeCodeVersionAdvice(info.claudeCode)
       }),
       info.mode === "login" ? /* @__PURE__ */ jsx(ClaudeAccount, {
         info,
@@ -953,5 +963,5 @@ export {
   CLAUDE_SETTINGS_ORDER
 };
 
-//# debugId=A598B55A640424AE64756E2164756E21
+//# debugId=AAE53C9B13349CB864756E2164756E21
 //# sourceMappingURL=client.js.map
