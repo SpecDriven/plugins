@@ -1551,6 +1551,14 @@ var models_default = `/* ---- Event Models (roadmap/support-event-modeling.md) -
   background: var(--surface-1);
 }
 
+/* The read-only site's inspector: a disabled fieldset, drawn as nothing. */
+.em-readonly {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
 .em-inspector-empty {
   padding: 1rem;
   color: var(--text-2);
@@ -11606,9 +11614,14 @@ function Row({ label, children: children2 }) {
   });
 }
 function Inspector(props) {
-  const { file, selection: selection2 } = props;
+  const { selection: selection2, readOnly } = props;
   if (!selection2) {
-    return /* @__PURE__ */ jsxs("div", {
+    return readOnly ? /* @__PURE__ */ jsx("div", {
+      className: "em-inspector-empty",
+      children: /* @__PURE__ */ jsx("p", {
+        children: "Select a card, a slice band or a lane to see it."
+      })
+    }) : /* @__PURE__ */ jsxs("div", {
       className: "em-inspector-empty",
       children: [
         /* @__PURE__ */ jsx("p", {
@@ -11621,6 +11634,15 @@ function Inspector(props) {
       ]
     });
   }
+  const panel = selected2(props, selection2);
+  return readOnly && panel ? /* @__PURE__ */ jsx("fieldset", {
+    className: "em-readonly",
+    disabled: true,
+    children: panel
+  }) : panel;
+}
+function selected2(props, selection2) {
+  const { file } = props;
   if (selection2.kind === "element") {
     const found = findElement(file.model, selection2.id);
     return found ? /* @__PURE__ */ jsx(ElementPanel, {
@@ -12568,12 +12590,12 @@ var SLICE_TYPE_LABEL2 = {
   STATE_VIEW: "State view",
   AUTOMATION: "Automation"
 };
-function ElementNodeView({ data, selected: selected2 }) {
+function ElementNodeView({ data, selected: selected3 }) {
   const { element } = data;
   const fields = element.fields.map((f) => f.name).filter(Boolean);
   const external = element.context === "EXTERNAL";
   return /* @__PURE__ */ jsxs("div", {
-    className: `em-card em-${element.type.toLowerCase()}${selected2 ? " selected" : ""}${external ? " external" : ""}`,
+    className: `em-card em-${element.type.toLowerCase()}${selected3 ? " selected" : ""}${external ? " external" : ""}`,
     title: element.description || element.title,
     children: [
       /* @__PURE__ */ jsx(Handle, {
@@ -12638,11 +12660,11 @@ function ElementNodeView({ data, selected: selected2 }) {
     ]
   });
 }
-function SliceNodeView({ data, selected: selected2 }) {
+function SliceNodeView({ data, selected: selected3 }) {
   const { slice, index: index3, feature } = data;
   const { openFeature } = useContext(SliceActionsContext);
   return /* @__PURE__ */ jsx("div", {
-    className: `em-slice${selected2 ? " selected" : ""}`,
+    className: `em-slice${selected3 ? " selected" : ""}`,
     children: /* @__PURE__ */ jsxs("div", {
       className: "em-slice-head",
       children: [
@@ -12681,10 +12703,10 @@ function SliceNodeView({ data, selected: selected2 }) {
     })
   });
 }
-function LaneNodeView({ data, selected: selected2 }) {
+function LaneNodeView({ data, selected: selected3 }) {
   const { lane } = data;
   return /* @__PURE__ */ jsx("div", {
-    className: `em-lane em-lane-${lane.kind.toLowerCase()}${selected2 ? " selected" : ""}`,
+    className: `em-lane em-lane-${lane.kind.toLowerCase()}${selected3 ? " selected" : ""}`,
     children: /* @__PURE__ */ jsxs("div", {
       className: "em-lane-title",
       children: [
@@ -12753,7 +12775,8 @@ function ModelCanvas({
   onCopyLink,
   copied,
   onClosed,
-  onSaveHandle
+  onSaveHandle,
+  readOnly = false
 }) {
   const [file, setFile] = useState(null);
   const fileRef = useRef(null);
@@ -12778,16 +12801,16 @@ function ModelCanvas({
     const wanted = pendingSelect.current;
     pendingSelect.current = null;
     setNodes((prev) => {
-      const selected2 = new Set(prev.filter((n) => n.selected).map((n) => n.id));
+      const selected3 = new Set(prev.filter((n) => n.selected).map((n) => n.id));
       if (wanted) {
-        selected2.clear();
-        selected2.add(wanted);
+        selected3.clear();
+        selected3.add(wanted);
       }
-      return flow.nodes.map((n) => ({ ...n, selected: selected2.has(n.id) }));
+      return flow.nodes.map((n) => ({ ...n, selected: selected3.has(n.id) }));
     });
     setEdges((prev) => {
-      const selected2 = new Set(prev.filter((e) => e.selected).map((e) => e.id));
-      return flow.edges.map((e) => ({ ...e, selected: selected2.has(e.id) }));
+      const selected3 = new Set(prev.filter((e) => e.selected).map((e) => e.id));
+      return flow.edges.map((e) => ({ ...e, selected: selected3.has(e.id) }));
     });
     if (wanted)
       setSelection(selectionOf(wanted));
@@ -12828,7 +12851,7 @@ function ModelCanvas({
     load();
   }, [load, reloadKey]);
   const save = useCallback(async () => {
-    if (closed.current)
+    if (closed.current || readOnly)
       return;
     await saveQueue.current.run(async () => {
       const sent = fileRef.current;
@@ -12861,7 +12884,7 @@ function ModelCanvas({
         setSaving(false);
       }
     });
-  }, [fileName]);
+  }, [fileName, readOnly]);
   const saveRef = useRef(save);
   saveRef.current = save;
   const flush = useCallback(async () => {
@@ -12889,6 +12912,11 @@ function ModelCanvas({
   }, [file]);
   useEffect(() => () => void saveRef.current(), []);
   const apply = useCallback((next, refused = "That is not allowed here.") => {
+    if (readOnly) {
+      if (fileRef.current)
+        derive(fileRef.current);
+      return;
+    }
     if (next === null) {
       toast.error(refused);
       if (fileRef.current)
@@ -12897,7 +12925,7 @@ function ModelCanvas({
     }
     setFile(next);
     setDirty(true);
-  }, [derive]);
+  }, [derive, readOnly]);
   const targetSlice = (current) => {
     if (selection2?.kind === "slice")
       return selection2.id;
@@ -13110,7 +13138,7 @@ function ModelCanvas({
         className: "editor-bar page-header",
         children: [
           /* @__PURE__ */ jsx(Breadcrumbs, {
-            items: [repoCrumb, { label: "Models" }],
+            items: [repoCrumb, { label: "Event Models" }],
             tail: /* @__PURE__ */ jsx("span", {
               className: "crumb current plain",
               children: file.name || modelStem(fileName)
@@ -13119,7 +13147,7 @@ function ModelCanvas({
           /* @__PURE__ */ jsxs("div", {
             className: "editor-actions page-actions",
             children: [
-              /* @__PURE__ */ jsx(SaveIndicator, {
+              !readOnly && /* @__PURE__ */ jsx(SaveIndicator, {
                 saving,
                 savedAt,
                 dirty
@@ -13175,8 +13203,8 @@ function ModelCanvas({
                     className: "chip-menu chip-menu-end",
                     containerSelector: ".em-menu-anchor",
                     items: [
-                      { id: "rename", label: "Rename", onSelect: () => void rename() },
-                      ...onStartSession ? [
+                      ...readOnly ? [] : [{ id: "rename", label: "Rename", onSelect: () => void rename() }],
+                      ...onStartSession && !readOnly ? [
                         {
                           id: "session",
                           label: "Start AI session over this model",
@@ -13186,14 +13214,16 @@ function ModelCanvas({
                           onSelect: () => onStartSession()
                         }
                       ] : [],
-                      {
-                        id: "arrange",
-                        label: "Arrange all cards",
-                        icon: /* @__PURE__ */ jsx(LayoutGrid, {
-                          size: 13
-                        }),
-                        onSelect: () => apply(autoLayoutFile(file, true))
-                      },
+                      ...readOnly ? [] : [
+                        {
+                          id: "arrange",
+                          label: "Arrange all cards",
+                          icon: /* @__PURE__ */ jsx(LayoutGrid, {
+                            size: 13
+                          }),
+                          onSelect: () => apply(autoLayoutFile(file, true))
+                        }
+                      ],
                       {
                         id: "copy-json",
                         label: "Copy export JSON",
@@ -13202,9 +13232,17 @@ function ModelCanvas({
                         }),
                         onSelect: () => void navigator.clipboard.writeText(JSON.stringify(file.model, null, 2)).then(() => toast.success("Copied the model's JSON.")).catch(() => toast.error("Could not copy to the clipboard."))
                       },
-                      { id: "delete", label: "Delete model", icon: /* @__PURE__ */ jsx(Trash, {
-                        size: 13
-                      }), danger: true, onSelect: () => void remove2() }
+                      ...readOnly ? [] : [
+                        {
+                          id: "delete",
+                          label: "Delete model",
+                          icon: /* @__PURE__ */ jsx(Trash, {
+                            size: 13
+                          }),
+                          danger: true,
+                          onSelect: () => void remove2()
+                        }
+                      ]
                     ]
                   })
                 ]
@@ -13213,7 +13251,7 @@ function ModelCanvas({
           })
         ]
       }),
-      /* @__PURE__ */ jsxs("div", {
+      !readOnly && /* @__PURE__ */ jsxs("div", {
         className: "em-toolbar",
         role: "toolbar",
         "aria-label": "Add to the model",
@@ -13342,7 +13380,9 @@ function ModelCanvas({
                   isValidConnection,
                   onEdgesDelete,
                   onNodesDelete: (gone) => void onNodesDelete(gone),
-                  deleteKeyCode: ["Backspace", "Delete"],
+                  nodesDraggable: !readOnly,
+                  nodesConnectable: !readOnly,
+                  deleteKeyCode: readOnly ? null : ["Backspace", "Delete"],
                   colorMode,
                   fitView: true,
                   fitViewOptions: { padding: 0.15, maxZoom: 1 },
@@ -13376,7 +13416,7 @@ function ModelCanvas({
                     "aria-hidden": "true"
                   }),
                   /* @__PURE__ */ jsx("p", {
-                    children: "An empty model. Add a slice, then the screen, command and event of it."
+                    children: readOnly ? "An empty model." : "An empty model. Add a slice, then the screen, command and event of it."
                   })
                 ]
               })
@@ -13394,7 +13434,8 @@ function ModelCanvas({
               onOpenFeature,
               onGenerateFeature: (sliceId) => void generateFeature(sliceId),
               prompt,
-              confirm
+              confirm,
+              readOnly
             })
           })
         ]
@@ -13412,7 +13453,15 @@ function groups(list) {
   }
   return [...map].sort(([a], [b]) => a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)).map(([dir, list2]) => ({ dir, models: list2 }));
 }
-function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink, onClosed }) {
+function ModelsSidebar({
+  active,
+  prompt,
+  confirm,
+  onNavigate,
+  onCopyLink,
+  onClosed,
+  readOnly = false
+}) {
   const store = useModels();
   const [menu, setMenu] = useState(null);
   const fileInput = useRef(null);
@@ -13516,9 +13565,9 @@ function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink, onClos
                 }),
                 onSelect: () => window.open(modelExportUrl(model.fileName), "_blank")
               },
-              { id: "delete", label: "Delete", icon: /* @__PURE__ */ jsx(Trash, {
+              ...readOnly ? [] : [{ id: "delete", label: "Delete", icon: /* @__PURE__ */ jsx(Trash, {
                 size: 13
-              }), danger: true, onSelect: () => void remove2(model) }
+              }), danger: true, onSelect: () => void remove2(model) }]
             ]
           })
         ]
@@ -13531,7 +13580,7 @@ function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink, onClos
     id: "side-panel-models",
     "aria-labelledby": "side-tab-models",
     children: [
-      /* @__PURE__ */ jsxs("div", {
+      !readOnly && /* @__PURE__ */ jsxs("div", {
         className: "sidebar-actions",
         children: [
           /* @__PURE__ */ jsx("button", {
@@ -13603,6 +13652,7 @@ var first = () => {
   const listed = modelsState().models[0];
   return listed ? { fileName: listed.fileName } : null;
 };
+var isReadOnly = (app) => app.readOnly === true;
 function Pane2({ view, app }) {
   const key = useReloadKey();
   const fileName = view.fileName ?? first()?.fileName;
@@ -13625,12 +13675,13 @@ function Pane2({ view, app }) {
     onCopyLink: app.copyLink,
     copied: app.copied,
     onClosed: app.goHome,
-    onSaveHandle: bindSave
+    onSaveHandle: bindSave,
+    readOnly: isReadOnly(app)
   }, fileName);
 }
 var tab = {
   id: "models",
-  title: "Models",
+  title: "Event Models",
   icon: Workflow,
   order: 40,
   shortcut: "g m",
@@ -13638,7 +13689,7 @@ var tab = {
     match: parseModelsRoute,
     path: modelsPath,
     key: (view) => view.fileName ?? MODELS_FOLDER,
-    title: (view) => view.fileName ? modelTitle(view.fileName, modelsState()) : "Models",
+    title: (view) => view.fileName ? modelTitle(view.fileName, modelsState()) : "Event Models",
     home: { fileName: null },
     resolve: (view) => view.fileName ? view : first()
   },
@@ -13648,11 +13699,12 @@ var tab = {
     confirm: app.confirm,
     onNavigate: (fileName, opts) => navigate({ fileName }, opts),
     onCopyLink: app.copyLink,
-    onClosed: app.goHome
+    onClosed: app.goHome,
+    readOnly: isReadOnly(app)
   }),
   Pane: Pane2,
   palette: {
-    group: "Models",
+    group: "Event Models",
     search: async (query, signal) => {
       const res = await fetch(`/api/search?scope=${MODELS_FOLDER}&q=${encodeURIComponent(query)}`, { signal });
       const data = await res.json();
@@ -13733,5 +13785,5 @@ export {
   client_default2 as default
 };
 
-//# debugId=AB455D077F6F6FC664756E2164756E21
+//# debugId=B08AD6D03B9A7AEA64756E2164756E21
 //# sourceMappingURL=client.js.map

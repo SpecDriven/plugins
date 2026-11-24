@@ -57,6 +57,8 @@ export interface InspectorProps {
   onGenerateFeature: (sliceId: string) => void;
   prompt: Prompt;
   confirm: Confirm;
+  /** The read-only site: what is selected is shown, its fields disabled. */
+  readOnly?: boolean;
 }
 
 const SLICE_TYPE_LABEL = {
@@ -82,9 +84,13 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function Inspector(props: InspectorProps) {
-  const { file, selection } = props;
+  const { selection, readOnly } = props;
   if (!selection) {
-    return (
+    return readOnly ? (
+      <div className="em-inspector-empty">
+        <p>Select a card, a slice band or a lane to see it.</p>
+      </div>
+    ) : (
       <div className="em-inspector-empty">
         <p>Select a card, a slice band or a lane to edit it.</p>
         <p className="hint">
@@ -94,6 +100,20 @@ export function Inspector(props: InspectorProps) {
       </div>
     );
   }
+  const panel = selected(props, selection);
+  // Read-only, every field and button is disabled; the feature link is an
+  // <a>, which a disabled fieldset leaves working.
+  return readOnly && panel ? (
+    <fieldset className="em-readonly" disabled>
+      {panel}
+    </fieldset>
+  ) : (
+    panel
+  );
+}
+
+function selected(props: InspectorProps, selection: Selection): ReactNode {
+  const { file } = props;
   if (selection.kind === "element") {
     const found = findElement(file.model, selection.id);
     return found ? <ElementPanel {...props} element={found.element} slice={found.slice} /> : null;
