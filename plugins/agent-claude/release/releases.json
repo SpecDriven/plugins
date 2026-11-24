@@ -2,6 +2,16 @@
   "plugin": "agent-claude",
   "releases": [
     {
+      "version": "1.21.0",
+      "file": "agent-claude-1.21.0.zip",
+      "sha256": "c13cba11e36f821825453c2e7494457beacd63a5b8b4bad500ab3bd384cc1ae2",
+      "size": 517767,
+      "date": "2026-11-24",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Agent SDK 0.3.331 (Claude Code 2.1.331); Settings → Claude says when the local Claude Code is older than the release the SDK is built for"
+    },
+    {
       "version": "1.20.0",
       "file": "agent-claude-1.20.0.zip",
       "sha256": "71f96f68e52056b9f3fd18ee67b2151e5e2e8fcae43bfe9a22825423afd7c24d",
@@ -90,16 +100,6 @@
       "api": "1",
       "minAppVersion": "0.1.196",
       "notes": "Settings calls the second sign-in \"API\", not \"API proxy\""
-    },
-    {
-      "version": "1.16.0",
-      "file": "agent-claude-1.16.0.zip",
-      "sha256": "2231c9059f8b96865befd672dbcd4841e415f32d05c19cbbf6fb16e8ac9fa353",
-      "size": 510983,
-      "date": "2026-11-07",
-      "api": "1",
-      "minAppVersion": "0.1.196",
-      "notes": "Report the context window to the pane's session popover"
     }
   ]
 }

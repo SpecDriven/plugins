@@ -14,8 +14,20 @@ for this platform from the npm registry, keeps it only if it matches the
 integrity pinned in `src/binaries.json`, and stores it under
 `~/.specdriven/claude-code/<sdk version>/<platform>/`. A `claude` on PATH
 still comes first. After bumping `@anthropic-ai/claude-agent-sdk`, run
-`bun scripts/pin-binaries.ts` to pin the new version's binaries (a test
-fails until the pins match the dependency).
+`bun scripts/pin-binaries.ts` to pin the new version's binaries and the
+Claude Code release the SDK is at parity with (a test fails until the pins
+match the dependency), then `bun scripts/check-sdk-parity.ts`, which checks
+that the SDK, the pins and the SDK's release notes ("Updated to parity with
+Claude Code v…") name the same Claude Code. The repository's
+`agent-sdk-update` workflow does all of this every day and opens a pull
+request when a newer SDK is out.
+
+Each SDK release drives the Claude Code release it is at parity with, so
+when the plugin is activated, and whenever Settings → Claude opens, it asks
+the local Claude Code for its version (`claude --version`). A `claude`
+older than the SDK's release is logged, and Settings → Claude asks to
+update it with `claude update`. The binary the plugin fetches is the SDK's
+own, so it always matches.
 
 What it keeps: its settings under `pluginSettings["agent-claude"]` in the
 app's settings.json (the sign-in mode, the proxy url, the pane's
@@ -38,7 +50,8 @@ src/auth.ts            how Claude signs in: proxy detection, the login, the --se
 src/settings.ts        the plugin's settings values and the PUT body's validation
 src/cli.ts             the Claude Code to run, and a test seam for its availability
 src/binary.ts          Claude Code fetched from npm when there is no claude command
-src/binaries.json      the pinned integrity of each platform's package (scripts/pin-binaries.ts)
+src/binaries.json      the pinned integrity of each platform's package and the SDK's Claude Code release (scripts/pin-binaries.ts)
+src/claudeVersion.ts   the local Claude Code's version against the SDK's
 src/ui/                the Settings section's React
 test/                  bun test, against an app checkout
 ```

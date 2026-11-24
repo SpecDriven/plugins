@@ -111,6 +111,29 @@ Releases), which rebuilds `dist/` as `specdriven plugin build` does. The
 scaffold's `.gitignore` leaves `dist/` out; a plugin listed here must not,
 until every app that could install it reads release folders.
 
+## Claude Agent SDK updates
+
+`agent-claude` bundles the Claude Agent SDK. `.github/workflows/agent-sdk-update.yml`
+runs every day (and from the Actions tab). When the SDK has a newer
+[release](https://github.com/anthropics/claude-agent-sdk-typescript/releases),
+it updates the dependency, pins the new binaries, checks that the SDK and
+its release notes agree on the Claude Code version it is at parity with,
+runs the type check and the tests, and releases a new patch version of
+`agent-claude`. It then opens a pull request on `automation/claude-agent-sdk`,
+or updates the one already open there, with the SDK's release notes in the
+body.
+
+The workflow opens its pull requests with the `SDK_UPDATE_TOKEN` secret: a
+fine-grained personal access token for this repository only, with Contents
+and Pull requests read and write (or a GitHub App token). Its pull requests
+start CI, and it needs no Actions setting. Without the secret the workflow
+falls back to its own `GITHUB_TOKEN`, which can open a pull request only
+where "Allow GitHub Actions to create and approve pull requests" is on —
+for this repository the SpecDriven organization holds that setting
+(Organization settings → Actions → General) — and whose pull requests do
+not start CI. The workflow is this repository's own: a new marketplace
+gets `ci.yml` only.
+
 ## Your own marketplace
 
 A company can keep its plugins in a marketplace of its own, a private

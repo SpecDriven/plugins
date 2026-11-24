@@ -36,8 +36,9 @@ export const BINARY_PLATFORMS = [
 
 export const REGISTRY = "https://registry.npmjs.org";
 
-/** The SDK version the pins are for, and each platform's npm integrity. */
-export const BINARY_PINS: { version: string; packages: Record<string, string> } = pins;
+/** The SDK version the pins are for, the Claude Code version it is at
+    parity with, and each platform's npm integrity. */
+export const BINARY_PINS: { version: string; claudeCodeVersion: string; packages: Record<string, string> } = pins;
 
 /** A Linux whose libc is musl, the way the SDK tells (no glibc in the report). */
 function isMusl(): boolean {
