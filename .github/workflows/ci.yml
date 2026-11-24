@@ -113,12 +113,17 @@ jobs:
         working-directory: plugins/${{ matrix.dir }}
         run: |
           if [ -d test ]; then bun test --timeout 20000; else echo "no tests"; fi
+      # Both checks run the app's `plugin build`, which takes a second but
+      # now and then hangs inside Bun.build: fail in minutes, not after the
+      # job's six-hour default.
       - name: dist/ matches src/
         if: matrix.kind == 'release'
+        timeout-minutes: 5
         working-directory: plugins
         run: bun scripts/check-dist.ts ${{ matrix.dir }}
       - name: The newest release is the plugin as committed
         if: matrix.kind == 'release'
+        timeout-minutes: 5
         working-directory: plugins
         run: bun scripts/check-release.ts ${{ matrix.dir }}
 
