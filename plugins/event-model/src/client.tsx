@@ -54,6 +54,12 @@ const first = (): ModelsRoute | null => {
   return listed ? { fileName: listed.fileName } : null;
 };
 
+/**
+ * The read-only site (specs.specdriven.app): the app says so from 0.1.231 on;
+ * an older app has no such site, and no `readOnly` to read.
+ */
+const isReadOnly = (app: object): boolean => (app as { readOnly?: unknown }).readOnly === true;
+
 function Pane({ view, app }: ComponentProps<TabPlugin<ModelsRoute>["Pane"]>) {
   const key = useReloadKey();
   const fileName = view.fileName ?? first()?.fileName;
@@ -77,13 +83,14 @@ function Pane({ view, app }: ComponentProps<TabPlugin<ModelsRoute>["Pane"]>) {
         copied={app.copied}
         onClosed={app.goHome}
         onSaveHandle={bindSave}
+        readOnly={isReadOnly(app)}
       />
   );
 }
 
 const tab: TabPlugin<ModelsRoute> = {
   id: "models",
-  title: "Models",
+  title: "Event Models",
   icon: Workflow,
   order: 40,
   shortcut: "g m",
@@ -91,10 +98,10 @@ const tab: TabPlugin<ModelsRoute> = {
     match: parseModelsRoute,
     path: modelsPath,
     key: (view) => view.fileName ?? MODELS_FOLDER,
-    title: (view) => (view.fileName ? modelTitle(view.fileName, modelsState()) : "Models"),
+    title: (view) => (view.fileName ? modelTitle(view.fileName, modelsState()) : "Event Models"),
     home: { fileName: null },
     // The bare folder opens the first model; an empty folder has nothing to
-    // open, so its link goes home and the rail has no Models icon.
+    // open, so its link goes home and the rail has no Event Models icon.
     resolve: (view) => (view.fileName ? view : first()),
   },
   Sidebar: ({ view, app, navigate }) => (
@@ -105,12 +112,13 @@ const tab: TabPlugin<ModelsRoute> = {
       onNavigate={(fileName, opts) => navigate({ fileName }, opts)}
       onCopyLink={app.copyLink}
       onClosed={app.goHome}
+      readOnly={isReadOnly(app)}
     />
   ),
   Pane,
   palette: {
-    group: "Models",
-    // The Models tab searches the models: one hit per model, by its name and
+    group: "Event Models",
+    // The Event Models tab searches the models: one hit per model, by its name and
     // what is on its canvas (src/server/search.ts, over the app's index).
     search: async (query, signal) => {
       const res = await fetch(

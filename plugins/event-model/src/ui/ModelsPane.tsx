@@ -169,6 +169,12 @@ export interface ModelsPaneProps {
    * the old model into the new folder.
    */
   onSaveHandle?: (handle: { flush: () => Promise<void> } | null) => void;
+  /**
+   * The read-only site (specs.specdriven.app): the model is shown, selected
+   * and inspected, never changed — no toolbar, no dragging or drawing, no
+   * saves, and only the menu's reads.
+   */
+  readOnly?: boolean;
 }
 
 export function ModelsPane(props: ModelsPaneProps) {
@@ -195,6 +201,7 @@ function ModelCanvas({
   copied,
   onClosed,
   onSaveHandle,
+  readOnly = false,
 }: ModelsPaneProps) {
   const [file, setFile] = useState<ModelFile | null>(null);
   const fileRef = useRef<ModelFile | null>(null);
@@ -296,7 +303,7 @@ function ModelCanvas({
       queued); the server's normalized copy is adopted unless more was
       typed while the request was out. */
   const save = useCallback(async (): Promise<void> => {
-    if (closed.current) return;
+    if (closed.current || readOnly) return;
     await saveQueue.current.run(async () => {
       const sent = fileRef.current;
       if (closed.current || !sent || sent === savedRef.current) return;
@@ -330,7 +337,7 @@ function ModelCanvas({
         setSaving(false);
       }
     });
-  }, [fileName]);
+  }, [fileName, readOnly]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -371,6 +378,10 @@ function ModelCanvas({
   /** The file after a gesture; null means the gesture was refused. */
   const apply = useCallback(
     (next: ModelFile | null, refused = "That is not allowed here.") => {
+      if (readOnly) {
+        if (fileRef.current) derive(fileRef.current);
+        return;
+      }
       if (next === null) {
         toast.error(refused);
         if (fileRef.current) derive(fileRef.current);
@@ -379,7 +390,7 @@ function ModelCanvas({
       setFile(next);
       setDirty(true);
     },
-    [derive],
+    [derive, readOnly],
   );
 
   /** The slice a new card goes in: the selected one, the selected card's, or the last. */
@@ -607,11 +618,11 @@ function ModelCanvas({
     <div className="em-pane">
       <header className="editor-bar page-header">
         <Breadcrumbs
-          items={[repoCrumb, { label: "Models" }]}
+          items={[repoCrumb, { label: "Event Models" }]}
           tail={<span className="crumb current plain">{file.name || modelStem(fileName)}</span>}
         />
         <div className="editor-actions page-actions">
-          <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
+          {!readOnly && <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />}
           <Tooltip label={copied === link ? "Copied" : "Copy link"}>
             <button type="button" className="ibtn" aria-label="Copy link" onClick={() => onCopyLink(link)}>
               {copied === link ? <Check size={15} aria-hidden="true" /> : <Link size={15} aria-hidden="true" />}
@@ -640,11 +651,11 @@ function ModelCanvas({
               className="chip-menu chip-menu-end"
               containerSelector=".em-menu-anchor"
               items={[
-                { id: "rename", label: "Rename", onSelect: () => void rename() },
+                ...(readOnly ? [] : [{ id: "rename", label: "Rename", onSelect: () => void rename() }]),
                 // A code gen session over the model (specs/agents/claude.spec.md):
                 // the prompt carries the model's JSON and the specs its
                 // slices link (src/server/session.ts).
-                ...(onStartSession
+                ...(onStartSession && !readOnly
                   ? [
                       {
                         id: "session",
@@ -654,12 +665,16 @@ function ModelCanvas({
                       },
                     ]
                   : []),
-                {
-                  id: "arrange",
-                  label: "Arrange all cards",
-                  icon: <LayoutGrid size={13} />,
-                  onSelect: () => apply(autoLayoutFile(file, true)),
-                },
+                ...(readOnly
+                  ? []
+                  : [
+                      {
+                        id: "arrange",
+                        label: "Arrange all cards",
+                        icon: <LayoutGrid size={13} />,
+                        onSelect: () => apply(autoLayoutFile(file, true)),
+                      },
+                    ]),
                 {
                   id: "copy-json",
                   label: "Copy export JSON",
@@ -670,12 +685,23 @@ function ModelCanvas({
                       .then(() => toast.success("Copied the model's JSON."))
                       .catch(() => toast.error("Could not copy to the clipboard.")),
                 },
-                { id: "delete", label: "Delete model", icon: <Trash2 size={13} />, danger: true, onSelect: () => void remove() },
+                ...(readOnly
+                  ? []
+                  : [
+                      {
+                        id: "delete",
+                        label: "Delete model",
+                        icon: <Trash2 size={13} />,
+                        danger: true,
+                        onSelect: () => void remove(),
+                      },
+                    ]),
               ]}
             />
           </span>
         </div>
       </header>
+      {!readOnly && (
       <div className="em-toolbar" role="toolbar" aria-label="Add to the model">
         {ELEMENT_TYPES.map((type) => (
           <button
@@ -738,6 +764,7 @@ function ModelCanvas({
           </span>
         )}
       </div>
+      )}
       <div className="em-body">
         <div className="em-canvas">
           <SliceActionsContext.Provider value={sliceActions}>
@@ -753,7 +780,9 @@ function ModelCanvas({
             isValidConnection={isValidConnection}
             onEdgesDelete={onEdgesDelete}
             onNodesDelete={(gone) => void onNodesDelete(gone as CanvasNode[])}
-            deleteKeyCode={["Backspace", "Delete"]}
+            nodesDraggable={!readOnly}
+            nodesConnectable={!readOnly}
+            deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
             colorMode={colorMode}
             fitView
             fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
@@ -771,7 +800,7 @@ function ModelCanvas({
           {file.model.slices.length === 0 && (
             <div className="em-empty">
               <Workflow size={28} aria-hidden="true" />
-              <p>An empty model. Add a slice, then the screen, command and event of it.</p>
+              <p>{readOnly ? "An empty model." : "An empty model. Add a slice, then the screen, command and event of it."}</p>
             </div>
           )}
         </div>
@@ -786,6 +815,7 @@ function ModelCanvas({
             onGenerateFeature={(sliceId) => void generateFeature(sliceId)}
             prompt={prompt}
             confirm={confirm}
+            readOnly={readOnly}
           />
         </aside>
       </div>
@@ -803,6 +833,8 @@ export interface ModelsSidebarProps {
   onCopyLink: (path: string) => void;
   /** The open model was deleted from the list. */
   onClosed: (fileName: string) => void;
+  /** The read-only site: the models are listed and opened, not created, imported or deleted. */
+  readOnly?: boolean;
 }
 
 function groups(list: ModelListing[]): { dir: string; models: ModelListing[] }[] {
@@ -818,7 +850,15 @@ function groups(list: ModelListing[]): { dir: string; models: ModelListing[] }[]
     .map(([dir, list]) => ({ dir, models: list }));
 }
 
-export function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink, onClosed }: ModelsSidebarProps) {
+export function ModelsSidebar({
+  active,
+  prompt,
+  confirm,
+  onNavigate,
+  onCopyLink,
+  onClosed,
+  readOnly = false,
+}: ModelsSidebarProps) {
   const store = useModels();
   const [menu, setMenu] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -912,7 +952,9 @@ export function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink,
               icon: <Download size={13} />,
               onSelect: () => window.open(modelExportUrl(model.fileName), "_blank"),
             },
-            { id: "delete", label: "Delete", icon: <Trash2 size={13} />, danger: true, onSelect: () => void remove(model) },
+            ...(readOnly
+              ? []
+              : [{ id: "delete", label: "Delete", icon: <Trash2 size={13} />, danger: true, onSelect: () => void remove(model) }]),
           ]}
         />
       </span>
@@ -921,6 +963,7 @@ export function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink,
 
   return (
     <div className="side-panel page-list" role="tabpanel" id="side-panel-models" aria-labelledby="side-tab-models">
+      {!readOnly && (
       <div className="sidebar-actions">
         <button onClick={() => void create()}>+ New model</button>
         <Tooltip label="Import an Event Modeling JSON file">
@@ -930,6 +973,7 @@ export function ModelsSidebar({ active, prompt, confirm, onNavigate, onCopyLink,
         </Tooltip>
         <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={(e) => void imported(e)} />
       </div>
+      )}
       <div className="page-rows">
         {store.error && <p className="error">{store.error}</p>}
         {groups(store.models).map(({ dir, models: list }) => (

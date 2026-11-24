@@ -2,6 +2,16 @@
   "plugin": "event-model",
   "releases": [
     {
+      "version": "2.1.0",
+      "file": "event-model-2.1.0.zip",
+      "sha256": "aef20a7a1393bcd679794c6d56b74971646a40b5c41e639ddaa6e22770326799",
+      "size": 169626,
+      "date": "2026-11-24",
+      "api": "1",
+      "minAppVersion": "0.1.87",
+      "notes": "The tab is labelled Event Models, and on the read-only site (specs.specdriven.app) models are shown, not edited"
+    },
+    {
       "version": "2.0.0",
       "file": "event-model-2.0.0.zip",
       "sha256": "39f3f4bf3dca864c05ad1a1bb7f08f9121ee504533e780120b8b805fd8801dd7",
