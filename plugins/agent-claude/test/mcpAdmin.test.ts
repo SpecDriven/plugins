@@ -14,7 +14,6 @@ import { handleApi, reloader } from "@specdriven/app/src/server/api";
 import * as engine from "@specdriven/app/src/server/agentChat";
 import { writeState } from "@specdriven/app/src/server/state";
 import { AgentError } from "@specdriven/host";
-import type { RunOptions, RunResult } from "@specdriven/host";
 import {
   CLAUDE_MCP_MANAGE,
   createMcpAdmin,
@@ -22,6 +21,8 @@ import {
   mcpJsonOf,
   withMcpAdmin,
   type ClaudeMcpAdmin,
+  type McpRunOptions,
+  type McpRunResult,
 } from "../src/mcpAdmin";
 import { mcpDetailsOf, type McpStatusAnswer, type McpToolCost } from "../src/mcpServers";
 import type { AgentMcpContext } from "../src/paneContract";
@@ -211,8 +212,8 @@ class StandbyQuery implements QueryLike {
 /** An admin over fakes: the Claude Codes it started, and the commands it ran. */
 function fakeAdmin(extra: { idleMs?: number; answerTimeoutMs?: number; executable?: () => string | null } = {}) {
   const started: StandbyQuery[] = [];
-  const ran: { cmd: string; args: string[]; options: RunOptions }[] = [];
-  const runner = { answer: { exitCode: 0, stdout: "", stderr: "" } as RunResult };
+  const ran: { cmd: string; args: string[]; options: McpRunOptions }[] = [];
+  const runner = { answer: { exitCode: 0, stdout: "", stderr: "" } as McpRunResult };
   const admin = createMcpAdmin({
     settings: async () => DEFAULT_SETTINGS,
     token: async () => null,

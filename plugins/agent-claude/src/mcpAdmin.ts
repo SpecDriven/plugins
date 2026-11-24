@@ -22,7 +22,6 @@
 
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { AgentError, run } from "@specdriven/host";
-import type { RunOptions, RunResult } from "@specdriven/host";
 import { claudeLaunch } from "./auth";
 import { claudeExecutable } from "./cli";
 import {
@@ -61,7 +60,28 @@ export const MCP_IDLE_MS = 5 * 60_000;
 /** How long `claude mcp add-json` or `remove` gets. */
 export const MCP_COMMAND_TIMEOUT_MS = 30_000;
 
-export type McpRunner = (cmd: string, args: string[], options?: RunOptions) => Promise<RunResult>;
+/** What the app's process runner takes and answers, as far as `claude mcp`
+    needs it. Declared here rather than imported: the oldest app the plugin
+    runs in has a runner with no stdin and no time limit — and no dialog,
+    so it never asks for either. */
+export interface McpRunOptions {
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+  /** Written to the command's stdin, which is then closed. */
+  input?: string;
+  timeoutMs?: number;
+  label?: string;
+}
+
+export interface McpRunResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  /** Set when the command was stopped at its time limit. */
+  timedOut?: true;
+}
+
+export type McpRunner = (cmd: string, args: string[], options?: McpRunOptions) => Promise<McpRunResult>;
 
 export interface McpAdminDeps {
   settings: () => Promise<ClaudeSettingsValues>;
@@ -95,7 +115,7 @@ export function mcpJsonOf(draft: McpServerDraft): Record<string, unknown> {
 }
 
 /** What Claude Code said when it refused: its own words, the last lines of them. */
-export function mcpCommandError(result: RunResult, what: string): string {
+export function mcpCommandError(result: McpRunResult, what: string): string {
   if (result.timedOut) return `Claude Code did not ${what} in time`;
   const said = (result.stderr.trim() || result.stdout.trim()).split("\n").map((l) => l.trim()).filter(Boolean);
   return said.length ? said.slice(0, 6).join(" ") : `Claude Code could not ${what} (exit ${result.exitCode})`;
@@ -120,7 +140,7 @@ export interface ClaudeMcpAdmin extends AgentMcpAdmin {
 
 export function createMcpAdmin(deps: McpAdminDeps): ClaudeMcpAdmin {
   const factory = () => deps.query ?? currentQueryFactory();
-  const runner = deps.run ?? run;
+  const runner = deps.run ?? (run as McpRunner);
   const executable = deps.executable ?? claudeExecutable;
   const idleMs = deps.idleMs ?? MCP_IDLE_MS;
   const answerMs = deps.answerTimeoutMs ?? MCP_ANSWER_TIMEOUT_MS;
