@@ -44,7 +44,7 @@ const guarded =
     });
 
 const plugin: Plugin<Context> = {
-  name: "models",
+  name: "event-model",
   inject: ["routes", "data", "sync", "search", "sessions"],
   apply(ctx) {
     const routes = ctx.need("routes");

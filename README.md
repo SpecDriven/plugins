@@ -42,7 +42,7 @@ To release a plugin, raise `version` in its package.json and run, with the
 app checked out at `../specdriven-app` (or `SPECDRIVEN_APP` naming it):
 
 ```bash
-bun scripts/release.ts plugins/models --notes "What changed, in a line"
+bun scripts/release.ts plugins/event-model --notes "What changed, in a line"
 ```
 
 That rebuilds `dist/`, writes the zip and its row, keeps the newest ten
@@ -99,8 +99,8 @@ checkout:
 
 ```bash
 bun scripts/check-index.ts
-bun scripts/check-dist.ts plugins/models
-bun scripts/check-release.ts plugins/models
+bun scripts/check-dist.ts plugins/event-model
+bun scripts/check-release.ts plugins/event-model
 ```
 
 Against an app from before release folders the release checks say they

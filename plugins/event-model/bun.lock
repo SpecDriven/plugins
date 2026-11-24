@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@specdriven/plugin-models",
+      "name": "@specdriven/plugin-event-model",
       "dependencies": {
         "@xyflow/react": "^12.11.6",
         "ajv": "^8.20.0",
