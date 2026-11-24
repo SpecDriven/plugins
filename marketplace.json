@@ -6,10 +6,10 @@
   },
   "plugins": [
     {
-      "name": "models",
-      "source": "./plugins/models",
+      "name": "event-model",
+      "source": "./plugins/event-model",
       "description": "Event Models drawn on a canvas, sliced into specs — the Models tab, formerly built in",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "category": "modeling",
       "api": "1"
     },

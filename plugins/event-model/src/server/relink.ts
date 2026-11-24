@@ -10,7 +10,7 @@ import { parseModelFile, serializeModelFile } from "../model/serialize";
 import type { ModelFile } from "../model/types";
 import { MODELS_FOLDER, modelFiles } from "./models";
 
-const log = getLogger("models");
+const log = getLogger("event-model");
 
 /** Rewrite the feature paths the models' slices point at; returns the files changed. */
 export async function relinkModels(dataDir: string, moved: ReadonlyMap<string, string>): Promise<string[]> {

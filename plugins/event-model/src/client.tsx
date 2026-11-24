@@ -165,14 +165,14 @@ const tab: TabPlugin<ModelsRoute> = {
 /** The canvas's stylesheet on the page, while the plugin is on. */
 function addStyles(): () => void {
   const style = document.createElement("style");
-  style.dataset.plugin = "models";
+  style.dataset.plugin = "event-model";
   style.textContent = `${flowCss}\n${modelsCss}`;
   document.head.append(style);
   return () => style.remove();
 }
 
 const plugin: Plugin<Context> = {
-  name: "models",
+  name: "event-model",
   inject: ["tabs"],
   async apply(ctx) {
     if (typeof document !== "undefined") ctx.effect(addStyles);

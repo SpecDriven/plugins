@@ -5,7 +5,9 @@ drawn on a canvas — screens, commands, events and read models in swimlanes,
 cut into vertical slices — and each slice scaffolded into a spec. It was
 built into SpecDriven until 0.1.86; from 0.1.87 it is this plugin, installed
 from Settings → Plugins → Marketplaces (a profile that had the Models switch
-on lists it there with "Find in marketplace").
+on lists it there with "Find in marketplace"). Until 2.0.0 its id was
+`models`; the tab, its `/models` urls and the `models/` folder kept their
+names.
 
 What it keeps in the data repo:
 

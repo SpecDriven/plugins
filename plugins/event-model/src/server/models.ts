@@ -42,7 +42,7 @@ import { emptyModelFile, type EventModel, type ModelFile } from "../model/types"
 import { schemaProblems } from "../model/validate";
 import { MODELS_FOLDER } from "../route";
 
-const log = getLogger("models");
+const log = getLogger("event-model");
 
 export { MODELS_FOLDER };
 const MODEL_SUFFIX = ".model.json";

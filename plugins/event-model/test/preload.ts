@@ -8,5 +8,5 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.SPECDRIVEN_ROOT = mkdtempSync(join(tmpdir(), "specdriven-models-root-"));
-process.env.SPECDRIVEN_HOME = mkdtempSync(join(tmpdir(), "specdriven-models-home-"));
+process.env.SPECDRIVEN_ROOT = mkdtempSync(join(tmpdir(), "specdriven-event-model-root-"));
+process.env.SPECDRIVEN_HOME = mkdtempSync(join(tmpdir(), "specdriven-event-model-home-"));
