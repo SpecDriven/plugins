@@ -33,6 +33,7 @@ import { claudeAvailable } from "./cli";
 import { claudeCodeVersion, forgetClaudeVersion } from "./claudeVersion";
 import type { ClaudeCodeVersion } from "./claudeVersion";
 import { listedClaudeModels, withReportedModels } from "./models";
+import { createMcpAdmin, withMcpAdmin } from "./mcpAdmin";
 import { createClaudeProvider, describeSignIn } from "./provider";
 import { withReconnect } from "./reconnect";
 import { ADOPTED_KEY, CLAUDE_LEGACY_KEYS, claudeSettingsOf, claudeSettingsPatch } from "./settings";
@@ -118,9 +119,14 @@ const plugin: Plugin<Context, HostConfig> = {
     const secrets = config.secrets(TOKEN_STORE);
     const settings = async () => claudeSettingsOf(await config.settings.read());
 
+    // The pane's "MCP servers…" dialog, before a session (src/mcpAdmin.ts):
+    // the Claude Code kept for it goes with the plugin.
+    const mcpAdmin = createMcpAdmin({ settings, token: () => storedToken(secrets) });
+    ctx.effect(() => () => mcpAdmin.forget());
+
     ctx.effect(() =>
       agents.register(
-        withReconnect(withReportedModels(createClaudeProvider({
+        withMcpAdmin(withReconnect(withReportedModels(createClaudeProvider({
           settings,
           token: () => storedToken(secrets),
           listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
@@ -139,6 +145,7 @@ const plugin: Plugin<Context, HostConfig> = {
         // A folder switch, or the pane's Retry: check the proxy again. Its
         // models may have changed meanwhile; the next menu asks it again.
         { settings, token: () => storedToken(secrets), answered: () => forgetAccountModels() }),
+        mcpAdmin),
       ),
     );
 
@@ -153,6 +160,8 @@ const plugin: Plugin<Context, HostConfig> = {
     const signInChanged = () => {
       forgetAccountModels();
       forgetClaudeVersion();
+      // A Claude Code kept for the MCP dialog runs under the old sign-in.
+      mcpAdmin.forget();
       signInAt = -Infinity;
       (agents as { changed?(id: string): void }).changed?.("claude");
     };

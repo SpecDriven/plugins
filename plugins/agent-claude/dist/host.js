@@ -44635,6 +44635,98 @@ function isUnsupportedRequest(error) {
   const text = error instanceof Error ? error.message : String(error);
   return /unsupported control request|is not supported in this context/i.test(text);
 }
+async function mcpStatus(query) {
+  if (!query.mcpServerStatus)
+    throw new AgentError(409, "This Claude Code does not list its MCP servers");
+  return await query.mcpServerStatus();
+}
+async function setMcpEnabled(query, name, enabled) {
+  if (!query.toggleMcpServer)
+    throw new AgentError(409, "This Claude Code cannot turn MCP servers on or off");
+  await query.toggleMcpServer(name, enabled);
+}
+async function reconnectMcp(query, name) {
+  if (!query.reconnectMcpServer)
+    throw new AgentError(409, "This Claude Code cannot reconnect MCP servers");
+  await query.reconnectMcpServer(name);
+}
+async function authenticateMcp(query, name) {
+  const unsupported = () => new AgentError(409, `This Claude Code cannot start an MCP sign-in from here; run \`claude\` in a terminal and sign in to "${name}" with /mcp`);
+  if (!query.mcpAuthenticate)
+    throw unsupported();
+  try {
+    return signInPage(await query.mcpAuthenticate(name));
+  } catch (e) {
+    if (isUnsupportedRequest(e))
+      throw unsupported();
+    throw e;
+  }
+}
+var DELETABLE = new Set(["local", "user", "project"]);
+var strings = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+var namesOf = (value) => value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : [];
+var toolKey = (server) => server.replace(/[^A-Za-z0-9_-]/g, "_");
+function toolsOf(server, tools, costs) {
+  const list = [];
+  const byName = new Map;
+  for (const raw of Array.isArray(tools) ? tools : []) {
+    if (!raw || typeof raw.name !== "string" || !raw.name || byName.has(raw.name))
+      continue;
+    const tool = {
+      name: raw.name,
+      ...typeof raw.description === "string" && raw.description ? { description: raw.description } : {}
+    };
+    byName.set(raw.name, tool);
+    list.push(tool);
+  }
+  const names = [...byName.keys()].sort((a, b) => b.length - a.length);
+  const prefix = `mcp__${toolKey(server)}__`;
+  for (const cost of costs) {
+    if (cost.serverName !== server || typeof cost.name !== "string" || typeof cost.tokens !== "number")
+      continue;
+    const full = cost.name;
+    const own = names.find((n) => full === n || full.endsWith(`__${n}`));
+    let tool = own ? byName.get(own) : undefined;
+    if (!tool) {
+      tool = { name: full.startsWith(prefix) ? full.slice(prefix.length) : full };
+      byName.set(tool.name, tool);
+      list.push(tool);
+    }
+    tool.tokens = cost.tokens;
+    tool.loaded = cost.isLoaded !== false;
+  }
+  return list;
+}
+function mcpDetailsOf(answer, fromApp = new Set, costs = null) {
+  const rows = mcpServersOf(answer, fromApp);
+  const byName = new Map(answer.filter((raw) => raw && typeof raw.name === "string").map((raw) => [raw.name, raw]));
+  return rows.map((row) => {
+    const raw = byName.get(row.name);
+    const config = raw.config ?? {};
+    const said = typeof raw.scope === "string" ? raw.scope : "";
+    const scope = !fromApp.has(row.name) && DELETABLE.has(said) ? said : undefined;
+    const args = strings(config.args);
+    const envNames = namesOf(config.env);
+    const headerNames = namesOf(config.headers);
+    const toolList = row.status === "connected" ? toolsOf(row.name, raw.tools, costs ?? []) : [];
+    const cost = (loaded) => toolList.filter((t) => t.loaded === loaded).reduce((n, t) => n + (t.tokens ?? 0), 0);
+    return {
+      ...row,
+      ...scope ? { scope } : {},
+      ...typeof config.type === "string" && config.type ? { transport: config.type } : {},
+      ...typeof config.command === "string" && config.command ? { command: config.command } : {},
+      ...args.length ? { args } : {},
+      ...typeof config.url === "string" && config.url ? { url: config.url } : {},
+      ...envNames.length ? { envNames } : {},
+      ...headerNames.length ? { headerNames } : {},
+      ...typeof raw.serverInfo?.name === "string" && raw.serverInfo.name ? { serverName: raw.serverInfo.name } : {},
+      ...typeof raw.serverInfo?.version === "string" && raw.serverInfo.version ? { version: raw.serverInfo.version } : {},
+      ...row.status === "connected" ? { tools: toolList.length, toolList } : {},
+      ...row.status === "connected" && costs ? { context: { loaded: cost(true), deferred: cost(false) } } : {},
+      canDelete: scope !== undefined
+    };
+  });
+}
 
 // plugins/agent-claude/src/provider.ts
 var PROVIDER_LABEL = {
@@ -45060,35 +45152,16 @@ class ClaudeSession {
     return this.query;
   }
   async mcpServers() {
-    const query = this.mcpQuery();
-    if (!query.mcpServerStatus)
-      throw new AgentError(409, "This Claude Code does not list its MCP servers");
-    return mcpServersOf(await query.mcpServerStatus(), this.appMcpServers);
+    return mcpServersOf(await mcpStatus(this.mcpQuery()), this.appMcpServers);
   }
   async setMcpServerEnabled(name, enabled) {
-    const query = this.mcpQuery();
-    if (!query.toggleMcpServer)
-      throw new AgentError(409, "This Claude Code cannot turn MCP servers on or off");
-    await query.toggleMcpServer(name, enabled);
+    await setMcpEnabled(this.mcpQuery(), name, enabled);
   }
   async reconnectMcpServer(name) {
-    const query = this.mcpQuery();
-    if (!query.reconnectMcpServer)
-      throw new AgentError(409, "This Claude Code cannot reconnect MCP servers");
-    await query.reconnectMcpServer(name);
+    await reconnectMcp(this.mcpQuery(), name);
   }
-  async authenticateMcpServer(name) {
-    const query = this.mcpQuery();
-    const unsupported = () => new AgentError(409, `This Claude Code cannot start an MCP sign-in from here; run \`claude\` in a terminal and sign in to "${name}" with /mcp`);
-    if (!query.mcpAuthenticate)
-      throw unsupported();
-    try {
-      return signInPage(await query.mcpAuthenticate(name));
-    } catch (e8) {
-      if (isUnsupportedRequest(e8))
-        throw unsupported();
-      throw e8;
-    }
+  authenticateMcpServer(name) {
+    return authenticateMcp(this.mcpQuery(), name);
   }
   totalsFromTurns() {
     if (this.lastWindowTokens === null)
@@ -45790,6 +45863,189 @@ function withReportedModels(provider, offered) {
   });
 }
 
+// plugins/agent-claude/src/mcpAdmin.ts
+var CLAUDE_MCP_MANAGE = {
+  scopes: ["local", "user", "project"],
+  transports: ["stdio", "http", "sse"]
+};
+var MCP_ANSWER_TIMEOUT_MS = 20000;
+var MCP_IDLE_MS = 5 * 60000;
+var MCP_COMMAND_TIMEOUT_MS = 30000;
+function mcpJsonOf(draft) {
+  if (draft.transport === "stdio") {
+    return {
+      type: "stdio",
+      command: draft.command ?? "",
+      args: [...draft.args ?? []],
+      ...draft.env && Object.keys(draft.env).length ? { env: { ...draft.env } } : {}
+    };
+  }
+  return {
+    type: draft.transport,
+    url: draft.url ?? "",
+    ...draft.headers && Object.keys(draft.headers).length ? { headers: { ...draft.headers } } : {}
+  };
+}
+function mcpCommandError(result, what) {
+  if (result.timedOut)
+    return `Claude Code did not ${what} in time`;
+  const said = (result.stderr.trim() || result.stdout.trim()).split(`
+`).map((l) => l.trim()).filter(Boolean);
+  return said.length ? said.slice(0, 6).join(" ") : `Claude Code could not ${what} (exit ${result.exitCode})`;
+}
+function createMcpAdmin(deps) {
+  const factory = () => deps.query ?? currentQueryFactory();
+  const runner = deps.run ?? run;
+  const executable = deps.executable ?? claudeExecutable;
+  const idleMs = deps.idleMs ?? MCP_IDLE_MS;
+  const answerMs = deps.answerTimeoutMs ?? MCP_ANSWER_TIMEOUT_MS;
+  const standbys = new Map;
+  const keyOf = (ctx) => JSON.stringify([ctx.cwd, (ctx.mcpServers ?? []).map((s) => [s.name, s.command, s.args])]);
+  const drop = (cwd) => {
+    const standing = standbys.get(cwd);
+    if (!standing)
+      return;
+    standbys.delete(cwd);
+    if (standing.up)
+      standing.up.stop();
+    else
+      standing.starting.then((s) => s.stop(), () => {
+        return;
+      });
+  };
+  const start = async (ctx) => {
+    const exe2 = executable();
+    const launch = await claudeLaunch(await deps.settings(), ctx.cwd, await deps.token());
+    const abortController = new AbortController;
+    const prompt = new InputQueue;
+    const query = await factory()({
+      prompt,
+      options: {
+        cwd: ctx.cwd,
+        pathToClaudeCodeExecutable: exe2 ?? undefined,
+        settingSources: ["user", "project", "local"],
+        ...ctx.mcpServers?.length ? { mcpServers: mcpServerConfigs(ctx.mcpServers) } : {},
+        persistSession: false,
+        abortController,
+        env: launch.env,
+        ...Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}
+      }
+    });
+    const standby = {
+      key: keyOf(ctx),
+      query,
+      fromApp: new Set((ctx.mcpServers ?? []).map((s) => s.name)),
+      stop() {
+        clearTimeout(standby.idle);
+        prompt.close();
+        abortController.abort();
+      }
+    };
+    return standby;
+  };
+  const standbyFor = async (ctx) => {
+    let standing = standbys.get(ctx.cwd);
+    if (standing) {
+      const known = await standing.starting.catch(() => null);
+      if (!known || known.key !== keyOf(ctx)) {
+        if (standbys.get(ctx.cwd) === standing)
+          drop(ctx.cwd);
+        standing = standbys.get(ctx.cwd);
+      }
+    }
+    if (!standing) {
+      const mine = { starting: start(ctx) };
+      standing = mine;
+      standbys.set(ctx.cwd, mine);
+      mine.starting.then((standby2) => {
+        mine.up = standby2;
+      }, () => {
+        if (standbys.get(ctx.cwd) === mine)
+          standbys.delete(ctx.cwd);
+      });
+    }
+    const standby = await standing.starting;
+    clearTimeout(standby.idle);
+    standby.idle = setTimeout(() => drop(ctx.cwd), idleMs);
+    standby.idle.unref?.();
+    return standby;
+  };
+  const ask = async (ctx, what, question) => {
+    const standby = await standbyFor(ctx);
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new AgentError(504, `Claude Code did not ${what} in time`)), answerMs);
+    });
+    try {
+      return await Promise.race([question(standby), timeout]);
+    } catch (e8) {
+      if (!(e8 instanceof AgentError) || e8.status === 504)
+        drop(ctx.cwd);
+      throw e8;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const claudeMcp = async (ctx, args, what, input) => {
+    const exe2 = executable();
+    if (!exe2)
+      throw new AgentError(502, "Claude Code is not installed");
+    const launch = await claudeLaunch(await deps.settings(), ctx.cwd, await deps.token());
+    const result = await runner(exe2, ["mcp", ...args], {
+      cwd: ctx.cwd,
+      env: launch.env,
+      timeoutMs: MCP_COMMAND_TIMEOUT_MS,
+      label: "claude mcp",
+      ...input === undefined ? {} : { input }
+    });
+    if (result.exitCode !== 0)
+      throw new AgentError(409, mcpCommandError(result, what));
+    drop(ctx.cwd);
+  };
+  return {
+    list(ctx) {
+      return ask(ctx, "list its MCP servers", async ({ query, fromApp }) => {
+        const status = await mcpStatus(query);
+        const usage = query.getContextUsage ? await query.getContextUsage({ detail: "summary" }).catch(() => null) : null;
+        const costs = usage && Array.isArray(usage.mcpTools) ? usage.mcpTools : null;
+        return {
+          servers: mcpDetailsOf(status, fromApp, costs),
+          ...usage && typeof usage.maxTokens === "number" && usage.maxTokens > 0 ? { contextWindow: usage.maxTokens } : {}
+        };
+      });
+    },
+    act(ctx, name, action) {
+      return ask(ctx, `${action} "${name}"`, async ({ query }) => {
+        if (action === "enable" || action === "disable")
+          return setMcpEnabled(query, name, action === "enable");
+        if (action === "reconnect")
+          return reconnectMcp(query, name);
+        return authenticateMcp(query, name);
+      });
+    },
+    add(ctx, draft) {
+      return claudeMcp(ctx, ["add-json", "--scope", draft.scope, "--", draft.name, "-"], `add "${draft.name}"`, JSON.stringify(mcpJsonOf(draft)));
+    },
+    remove(ctx, name, scope) {
+      return claudeMcp(ctx, ["remove", "--scope", scope, "--", name], `delete "${name}"`);
+    },
+    release(ctx) {
+      drop(ctx.cwd);
+    },
+    forget() {
+      for (const cwd of [...standbys.keys()])
+        drop(cwd);
+    },
+    standing() {
+      return [...standbys.keys()];
+    }
+  };
+}
+function withMcpAdmin(provider, admin) {
+  Object.assign(provider.capabilities, { mcpManage: CLAUDE_MCP_MANAGE });
+  return Object.assign(provider, { mcp: admin });
+}
+
 // plugins/agent-claude/src/reconnect.ts
 var RECONNECT_TRIES = 3;
 var RECONNECT_PAUSE_MS = 1000;
@@ -45890,7 +46146,9 @@ var plugin = {
     const data = ctx.need("data");
     const secrets = config.secrets(TOKEN_STORE);
     const settings = async () => claudeSettingsOf(await config.settings.read());
-    ctx.effect(() => agents2.register(withReconnect(withReportedModels(createClaudeProvider({
+    const mcpAdmin = createMcpAdmin({ settings, token: () => storedToken(secrets) });
+    ctx.effect(() => () => mcpAdmin.forget());
+    ctx.effect(() => agents2.register(withMcpAdmin(withReconnect(withReportedModels(createClaudeProvider({
       settings,
       token: () => storedToken(secrets),
       listedModels: async () => listedClaudeModels(await data.dir().catch(() => null)),
@@ -45902,12 +46160,13 @@ var plugin = {
           throw new AgentError(400, parsed.error);
         await config.settings.write(parsed.patch);
       }
-    }), () => offeredModels()), { settings, token: () => storedToken(secrets), answered: () => forgetAccountModels() })));
+    }), () => offeredModels()), { settings, token: () => storedToken(secrets), answered: () => forgetAccountModels() }), mcpAdmin)));
     let signInLogin = null;
     let signInAt = -Infinity;
     const signInChanged2 = () => {
       forgetAccountModels();
       forgetClaudeVersion();
+      mcpAdmin.forget();
       signInAt = -Infinity;
       agents2.changed?.("claude");
     };
@@ -46083,5 +46342,5 @@ export {
   DEMO_REFUSAL
 };
 
-//# debugId=BC3D6E973675C20764756E2164756E21
+//# debugId=D70005FCC60C5C6E64756E2164756E21
 //# sourceMappingURL=host.js.map
