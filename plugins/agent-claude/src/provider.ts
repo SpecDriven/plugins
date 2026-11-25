@@ -240,7 +240,7 @@ export class InputQueue<T> implements AsyncIterable<T> {
 /** What we need of the SDK's Query — narrow, so a test can hand in a fake. */
 export interface QueryLike extends AsyncIterable<SDKMessage> {
   interrupt(): Promise<unknown>;
-  setPermissionMode(mode: PermissionMode): Promise<void>;
+  setPermissionMode(mode: PermissionMode): Promise<unknown>;
   supportedCommands(): Promise<SlashCommand[]>;
   /** Optional: a fake need not answer it. */
   accountInfo?(): Promise<AccountInfoLike | undefined>;
