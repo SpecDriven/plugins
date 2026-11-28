@@ -2,6 +2,16 @@
   "plugin": "agent-claude",
   "releases": [
     {
+      "version": "1.22.1",
+      "file": "agent-claude-1.22.1.zip",
+      "sha256": "6c0c9ead98347497c6d45fa2f2c55648272bd82d255b1c0241053c611d85b692",
+      "size": 522463,
+      "date": "2026-11-28",
+      "api": "1",
+      "minAppVersion": "0.1.196",
+      "notes": "Agent SDK 0.3.332 (Claude Code 2.1.332)"
+    },
+    {
       "version": "1.22.0",
       "file": "agent-claude-1.22.0.zip",
       "sha256": "d29fa685eb21c9cec75bb28b5467435e3a1e34d40222721a25f7115c2228a27d",
@@ -90,16 +100,6 @@
       "api": "1",
       "minAppVersion": "0.1.196",
       "notes": "A folder switch checks the API proxy again"
-    },
-    {
-      "version": "1.16.2",
-      "file": "agent-claude-1.16.2.zip",
-      "sha256": "2e83d7c14ae5a3704f4f8a4b207a510c6b595987c6c8495599770996dc20d239",
-      "size": 511365,
-      "date": "2026-11-09",
-      "api": "1",
-      "minAppVersion": "0.1.196",
-      "notes": "The pane's choices carry the sign-in, so the header chip shows with no session"
     }
   ]
 }
